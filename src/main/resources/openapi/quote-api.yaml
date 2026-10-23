@@ -1,0 +1,959 @@
+openapi: 3.1.0
+
+info:
+  title: Quote API
+  version: 1.0.0
+  summary: Submit small-business general liability risks and receive quotes.
+  description: |
+    Brokers submit a small-business general liability (GL) risk as a **submission**,
+    then request a **quote** for it. A submission is immutable; to change the risk,
+    create a new submission.
+
+    ## Versioning and compatibility
+
+    The major version is part of the path (`/v1`). This document describes v1 only;
+    `info.version` is the semantic version of this document.
+
+    Changes that ship within v1 (minor version bump) are **additive only**:
+    new endpoints, new optional request fields, new response fields, and new values
+    for fields documented as extensible (`Quote.status`, `RatingFactor.code`,
+    `StatusReason.code`).
+
+    Breaking changes (removing or renaming fields, changing types or meaning,
+    tightening validation) are released as `/v2`, which runs alongside v1 for a
+    published deprecation window. Deprecated versions are signalled with
+    `Deprecation` (RFC 9745) and `Sunset` (RFC 8594) response headers.
+
+    Clients **must**:
+    - ignore unknown properties in responses (tolerant reader);
+    - treat unknown values of extensible enums and codes as described on each field.
+
+    ## Validation
+
+    - **400** `validation-error`: the request does not match this contract
+      (types, required fields, lengths, patterns, unknown properties).
+    - **422** `business-rule-violation`: the request matches the contract but
+      breaks a business rule. Current rules:
+      - `effectiveDate` must not be in the past and no more than 90 days ahead;
+      - `currency` must be `USD`;
+      - `address.country` must be `US`;
+      - `annualRevenue.amount` must be greater than zero;
+      - `requestedLimit` must be an offered combination (1,000,000 / 2,000,000 or
+        2,000,000 / 4,000,000);
+      - `classOfBusiness.naicsCode` must be a class we write.
+
+      These rules may change without a version change.
+
+    A declined or referred risk is **not** an error: requesting a quote returns
+    `201` with `status` `DECLINED` or `REFERRED`.
+
+    ## Errors
+
+    All error responses use RFC 9457 Problem Details (`application/problem+json`).
+    Branch on `type`, never on `title` or `detail`.
+
+    ## Money
+
+    Monetary amounts are `{ "amount": "<decimal string>", "currency": "<ISO 4217>" }`.
+    Amounts are strings to avoid floating-point loss; parse them with a decimal type.
+    Premiums are rounded half-up to cents once, at the end of rating.
+
+    ## Idempotency
+
+    Both `POST` operations accept an optional `Idempotency-Key` header. Sending one is
+    strongly recommended: retrying with the same key and body returns the original
+    response instead of creating a duplicate.
+  contact:
+    name: Quote Service Team
+
+servers:
+  - url: https://api.example.com
+    description: Placeholder; replace with the real API host.
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Submissions
+    description: Risks submitted by brokers for quoting.
+  - name: Quotes
+    description: Priced offers produced from submissions.
+
+paths:
+  /v1/submissions:
+    post:
+      tags: [Submissions]
+      operationId: createSubmission
+      summary: Create a submission
+      description: Submits a small-business GL risk. The submission is immutable once created.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmissionRequest'
+            examples:
+              restaurant:
+                $ref: '#/components/examples/SubmissionRequestRestaurant'
+      responses:
+        '201':
+          description: Submission created.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Submission'
+              examples:
+                restaurant:
+                  $ref: '#/components/examples/SubmissionRestaurant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/submissions/{submissionId}:
+    get:
+      tags: [Submissions]
+      operationId: getSubmission
+      summary: Get a submission
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+      responses:
+        '200':
+          description: The submission.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Submission'
+              examples:
+                restaurant:
+                  $ref: '#/components/examples/SubmissionRestaurant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/submissions/{submissionId}/quotes:
+    post:
+      tags: [Quotes]
+      operationId: createQuote
+      summary: Request a quote for a submission
+      description: |
+        Rates the submission and returns the resulting quote. A submission may be
+        quoted more than once (for example, after an earlier quote expires); each
+        request creates a new quote.
+
+        The outcome is reported in `status`. `DECLINED` and `REFERRED` are business
+        outcomes, not errors, and are returned with `201`.
+      parameters:
+        - $ref: '#/components/parameters/SubmissionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Quote created.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quote'
+              examples:
+                quoted:
+                  $ref: '#/components/examples/QuoteQuoted'
+                referred:
+                  $ref: '#/components/examples/QuoteReferred'
+                declined:
+                  $ref: '#/components/examples/QuoteDeclined'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/quotes/{quoteId}:
+    get:
+      tags: [Quotes]
+      operationId: getQuote
+      summary: Get a quote
+      description: |
+        Returns the quote. `status` is evaluated at read time, so a `QUOTED` quote
+        whose `expiresAt` has passed is returned as `EXPIRED`.
+      parameters:
+        - $ref: '#/components/parameters/QuoteId'
+      responses:
+        '200':
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quote'
+              examples:
+                quoted:
+                  $ref: '#/components/examples/QuoteQuoted'
+                expired:
+                  $ref: '#/components/examples/QuoteExpired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token issued to the broker (OAuth 2.0 client credentials at the gateway).
+        A broker can only access its own submissions and quotes; another broker's
+        resource returns `404`.
+
+  parameters:
+    SubmissionId:
+      name: submissionId
+      in: path
+      required: true
+      description: Opaque submission identifier.
+      schema:
+        $ref: '#/components/schemas/ResourceId'
+      example: sub_01JB7Q8N4K2M3P5R6S7T8V9W0X
+    QuoteId:
+      name: quoteId
+      in: path
+      required: true
+      description: Opaque quote identifier.
+      schema:
+        $ref: '#/components/schemas/ResourceId'
+      example: qte_01JB7QA2C3D4E5F6G7H8J9K0LM
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Optional but strongly recommended. A unique value (for example a UUID) chosen
+        by the client for each logical operation.
+
+        - Same key, same body: the original response is returned; nothing new is created.
+        - Same key, different body: `422` `idempotency-key-reuse`.
+        - Same key while the original request is still in progress: `409` `idempotency-conflict`.
+
+        Keys are scoped to the authenticated broker and kept for 24 hours. Without a
+        key, every request creates a new resource.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+      example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+
+  headers:
+    Location:
+      description: URL of the created resource.
+      schema:
+        type: string
+        format: uri-reference
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema:
+        type: integer
+        minimum: 0
+
+  schemas:
+    ResourceId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: Opaque identifier. Do not parse or infer meaning from its format.
+
+    Money:
+      type: object
+      description: A monetary amount. `amount` is a decimal string; parse it with a decimal type, not a float.
+      required: [amount, currency]
+      additionalProperties: false
+      properties:
+        amount:
+          type: string
+          pattern: '^\d{1,13}(\.\d{1,2})?$'
+          description: Non-negative decimal with at most 2 fractional digits.
+          examples: ['1200000.00']
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 currency code. Only `USD` is currently accepted (422 otherwise).
+          examples: [USD]
+
+    Address:
+      type: object
+      description: Risk location. Only US addresses are currently accepted (422 otherwise).
+      required: [line1, city, region, postalCode, country]
+      additionalProperties: false
+      properties:
+        line1:
+          type: string
+          minLength: 1
+          maxLength: 100
+        line2:
+          type: string
+          maxLength: 100
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+        region:
+          type: string
+          pattern: '^[A-Z]{2}$'
+          description: Two-letter US state code.
+        postalCode:
+          type: string
+          pattern: '^\d{5}(-\d{4})?$'
+          description: US ZIP or ZIP+4.
+        country:
+          type: string
+          pattern: '^[A-Z]{2}$'
+          description: ISO 3166-1 alpha-2 country code.
+
+    ClassOfBusiness:
+      type: object
+      description: The insured's class of business, identified by NAICS code.
+      required: [naicsCode]
+      additionalProperties: false
+      properties:
+        naicsCode:
+          type: string
+          pattern: '^\d{6}$'
+          description: |
+            Six-digit 2022 NAICS code. Any well-formed code passes schema validation;
+            codes outside our appetite are rejected with `422`.
+
+    ClassOfBusinessDetail:
+      type: object
+      description: Class of business as stored, with the server-resolved description.
+      required: [naicsCode, description]
+      properties:
+        naicsCode:
+          type: string
+          pattern: '^\d{6}$'
+          description: Six-digit 2022 NAICS code.
+        description:
+          type: string
+          description: NAICS title for the code.
+
+    RequestedLimit:
+      type: object
+      description: |
+        GL limits requested. Only offered combinations are accepted (422 otherwise);
+        see the API description for the current list.
+      required: [perOccurrence, aggregate]
+      additionalProperties: false
+      properties:
+        perOccurrence:
+          $ref: '#/components/schemas/Money'
+        aggregate:
+          $ref: '#/components/schemas/Money'
+
+    SubmissionRequest:
+      type: object
+      description: A small-business GL risk submitted for quoting. Unknown properties are rejected.
+      required: [businessName, address, classOfBusiness, annualRevenue, requestedLimit, effectiveDate]
+      additionalProperties: false
+      properties:
+        businessName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '\S'
+          description: Legal name of the insured. Must not be blank.
+        address:
+          $ref: '#/components/schemas/Address'
+        classOfBusiness:
+          $ref: '#/components/schemas/ClassOfBusiness'
+        annualRevenue:
+          $ref: '#/components/schemas/Money'
+          description: Annual gross revenue; the exposure base. Must be greater than zero (422 otherwise).
+        requestedLimit:
+          $ref: '#/components/schemas/RequestedLimit'
+        effectiveDate:
+          type: string
+          format: date
+          description: |
+            Requested policy effective date (RFC 3339 full-date, no time zone).
+            Must not be in the past and no more than 90 days ahead (422 otherwise).
+
+    Submission:
+      type: object
+      description: A submission as stored. Clients must ignore unknown properties.
+      required: [id, businessName, address, classOfBusiness, annualRevenue, requestedLimit, effectiveDate, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ResourceId'
+        businessName:
+          type: string
+        address:
+          $ref: '#/components/schemas/Address'
+        classOfBusiness:
+          $ref: '#/components/schemas/ClassOfBusinessDetail'
+        annualRevenue:
+          $ref: '#/components/schemas/Money'
+        requestedLimit:
+          $ref: '#/components/schemas/RequestedLimit'
+        effectiveDate:
+          type: string
+          format: date
+        createdAt:
+          type: string
+          format: date-time
+          description: When the submission was created (UTC).
+
+    QuoteStatus:
+      type: string
+      enum: [QUOTED, REFERRED, DECLINED, EXPIRED]
+      description: |
+        Outcome of rating.
+
+        - `QUOTED`: priced and bindable until `expiresAt`.
+        - `REFERRED`: needs underwriter review; no premium.
+        - `DECLINED`: outside appetite; no premium.
+        - `EXPIRED`: was `QUOTED` and `expiresAt` has passed; premium retained for the record.
+
+        **Extensible:** new values may be added. Clients must treat unknown values as non-bindable.
+
+    RatingFactor:
+      type: object
+      description: A factor applied during rating.
+      required: [code, description, inputValue, factor]
+      properties:
+        code:
+          type: string
+          description: |
+            Factor identifier, e.g. `CLASS`, `TERRITORY`, `REVENUE_BAND`, `LIMIT`.
+            **Open set:** new codes may appear when rating plans change.
+        description:
+          type: string
+          description: Human-readable label.
+        inputValue:
+          type: string
+          description: The value that was looked up to determine the factor.
+        factor:
+          type: string
+          pattern: '^\d{1,4}(\.\d{1,6})?$'
+          description: Multiplier as a decimal string.
+
+    StatusReason:
+      type: object
+      description: Why a quote was referred or declined.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable reason. **Open set:** new codes may be added.
+        message:
+          type: string
+          description: Human-readable explanation.
+
+    Quote:
+      type: object
+      description: |
+        A quote produced from a submission. Clients must ignore unknown properties.
+
+        `premium` and `expiresAt` are present only when `status` is `QUOTED` or `EXPIRED`.
+      required: [id, submissionId, status, ratingFactors, statusReasons, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ResourceId'
+        submissionId:
+          $ref: '#/components/schemas/ResourceId'
+        status:
+          $ref: '#/components/schemas/QuoteStatus'
+        premium:
+          $ref: '#/components/schemas/Money'
+          description: Annual premium. Present only when `status` is `QUOTED` or `EXPIRED`.
+        ratingFactors:
+          type: array
+          description: Factors in the order they were applied. May be empty if the risk was not rated.
+          items:
+            $ref: '#/components/schemas/RatingFactor'
+        statusReasons:
+          type: array
+          description: Reasons for `REFERRED` or `DECLINED`. Empty otherwise.
+          items:
+            $ref: '#/components/schemas/StatusReason'
+        createdAt:
+          type: string
+          format: date-time
+          description: When the quote was created (UTC).
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the offer stops being bindable (UTC). Present only when `premium` is present.
+
+    Problem:
+      type: object
+      description: |
+        RFC 9457 Problem Details. `type` is the stable identifier clients branch on;
+        `title` is fixed per `type`; `detail` is specific to this occurrence.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: Identifies the problem type.
+        title:
+          type: string
+          description: Short summary of the problem type.
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP status code.
+        detail:
+          type: string
+          description: Explanation specific to this occurrence.
+        instance:
+          type: string
+          format: uri-reference
+          description: The request path this problem relates to.
+        traceId:
+          type: string
+          description: Correlation ID for support.
+
+    ValidationProblem:
+      description: A problem with field-level errors, used for `validation-error` and `business-rule-violation`.
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            errors:
+              type: array
+              items:
+                $ref: '#/components/schemas/FieldError'
+
+    FieldError:
+      type: object
+      required: [pointer, detail]
+      properties:
+        pointer:
+          type: string
+          description: JSON Pointer (RFC 6901) to the offending location in the request body.
+        detail:
+          type: string
+          description: What is wrong at that location.
+
+  responses:
+    BadRequest:
+      description: The request does not match the contract.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+          examples:
+            validationError:
+              $ref: '#/components/examples/ProblemValidationError'
+            malformedRequest:
+              $ref: '#/components/examples/ProblemMalformedRequest'
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unauthenticated:
+              $ref: '#/components/examples/ProblemUnauthenticated'
+    NotFound:
+      description: The resource does not exist or belongs to another broker.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notFound:
+              $ref: '#/components/examples/ProblemNotFound'
+    NotAcceptable:
+      description: None of the media types in `Accept` can be produced.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notAcceptable:
+              $ref: '#/components/examples/ProblemNotAcceptable'
+    Conflict:
+      description: A request with the same `Idempotency-Key` is still in progress. Retry shortly.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            idempotencyConflict:
+              $ref: '#/components/examples/ProblemIdempotencyConflict'
+    UnsupportedMediaType:
+      description: The request body media type is not `application/json`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unsupportedMediaType:
+              $ref: '#/components/examples/ProblemUnsupportedMediaType'
+    UnprocessableEntity:
+      description: |
+        The request matches the contract but cannot be processed: a business rule
+        failed (`business-rule-violation`), or an `Idempotency-Key` was reused with
+        a different body (`idempotency-key-reuse`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+          examples:
+            businessRuleViolation:
+              $ref: '#/components/examples/ProblemBusinessRuleViolation'
+            idempotencyKeyReuse:
+              $ref: '#/components/examples/ProblemIdempotencyKeyReuse'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            rateLimited:
+              $ref: '#/components/examples/ProblemRateLimited'
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            internalError:
+              $ref: '#/components/examples/ProblemInternalError'
+    ServiceUnavailable:
+      description: The service is temporarily unavailable.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            serviceUnavailable:
+              $ref: '#/components/examples/ProblemServiceUnavailable'
+
+  examples:
+    SubmissionRequestRestaurant:
+      summary: Texas full-service restaurant
+      value:
+        businessName: Lone Star Smokehouse LLC
+        address:
+          line1: 1200 Congress Ave
+          city: Austin
+          region: TX
+          postalCode: '78701'
+          country: US
+        classOfBusiness:
+          naicsCode: '722511'
+        annualRevenue:
+          amount: '1200000.00'
+          currency: USD
+        requestedLimit:
+          perOccurrence:
+            amount: '1000000.00'
+            currency: USD
+          aggregate:
+            amount: '2000000.00'
+            currency: USD
+        effectiveDate: '2026-11-01'
+
+    SubmissionRestaurant:
+      summary: Texas full-service restaurant
+      value:
+        id: sub_01JB7Q8N4K2M3P5R6S7T8V9W0X
+        businessName: Lone Star Smokehouse LLC
+        address:
+          line1: 1200 Congress Ave
+          city: Austin
+          region: TX
+          postalCode: '78701'
+          country: US
+        classOfBusiness:
+          naicsCode: '722511'
+          description: Full-Service Restaurants
+        annualRevenue:
+          amount: '1200000.00'
+          currency: USD
+        requestedLimit:
+          perOccurrence:
+            amount: '1000000.00'
+            currency: USD
+          aggregate:
+            amount: '2000000.00'
+            currency: USD
+        effectiveDate: '2026-11-01'
+        createdAt: '2026-10-23T14:05:12Z'
+
+    QuoteQuoted:
+      summary: Priced and bindable
+      value:
+        id: qte_01JB7QA2C3D4E5F6G7H8J9K0LM
+        submissionId: sub_01JB7Q8N4K2M3P5R6S7T8V9W0X
+        status: QUOTED
+        premium:
+          amount: '2847.50'
+          currency: USD
+        ratingFactors:
+          - code: CLASS
+            description: Class of business
+            inputValue: '722511'
+            factor: '1.2500'
+          - code: TERRITORY
+            description: Rating territory
+            inputValue: TX-201
+            factor: '1.0500'
+          - code: REVENUE_BAND
+            description: Annual revenue band
+            inputValue: 1000000-2499999
+            factor: '0.9500'
+          - code: LIMIT
+            description: Limit combination
+            inputValue: 1000000/2000000
+            factor: '1.0000'
+        statusReasons: []
+        createdAt: '2026-10-23T14:05:13Z'
+        expiresAt: '2026-11-22T14:05:13Z'
+
+    QuoteExpired:
+      summary: Quoted, then expired
+      value:
+        id: qte_01JB7QA2C3D4E5F6G7H8J9K0LM
+        submissionId: sub_01JB7Q8N4K2M3P5R6S7T8V9W0X
+        status: EXPIRED
+        premium:
+          amount: '2847.50'
+          currency: USD
+        ratingFactors:
+          - code: CLASS
+            description: Class of business
+            inputValue: '722511'
+            factor: '1.2500'
+          - code: TERRITORY
+            description: Rating territory
+            inputValue: TX-201
+            factor: '1.0500'
+          - code: REVENUE_BAND
+            description: Annual revenue band
+            inputValue: 1000000-2499999
+            factor: '0.9500'
+          - code: LIMIT
+            description: Limit combination
+            inputValue: 1000000/2000000
+            factor: '1.0000'
+        statusReasons: []
+        createdAt: '2026-10-23T14:05:13Z'
+        expiresAt: '2026-11-22T14:05:13Z'
+
+    QuoteReferred:
+      summary: Needs underwriter review
+      value:
+        id: qte_01JB7QB3D4E5F6G7H8J9K0LMNP
+        submissionId: sub_01JB7Q8N4K2M3P5R6S7T8V9W0X
+        status: REFERRED
+        ratingFactors: []
+        statusReasons:
+          - code: REVENUE_ABOVE_AUTO_LIMIT
+            message: Annual revenue exceeds the automatic quoting limit for this class.
+        createdAt: '2026-10-23T14:05:13Z'
+
+    QuoteDeclined:
+      summary: Outside appetite
+      value:
+        id: qte_01JB7QC4E5F6G7H8J9K0LMNPQR
+        submissionId: sub_01JB7Q8N4K2M3P5R6S7T8V9W0X
+        status: DECLINED
+        ratingFactors: []
+        statusReasons:
+          - code: TERRITORY_NOT_WRITTEN
+            message: We do not currently write this class in the risk's rating territory.
+        createdAt: '2026-10-23T14:05:13Z'
+
+    ProblemValidationError:
+      summary: Schema validation failed
+      value:
+        type: https://api.example.com/problems/validation-error
+        title: Request failed schema validation
+        status: 400
+        detail: The request body has 3 validation errors.
+        instance: /v1/submissions
+        traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+        errors:
+          - pointer: /address/postalCode
+            detail: Required property is missing.
+          - pointer: /address/region
+            detail: Must match pattern ^[A-Z]{2}$ (two-letter US state code).
+          - pointer: /efectiveDate
+            detail: Unknown property.
+
+    ProblemMalformedRequest:
+      summary: Body is not valid JSON
+      value:
+        type: https://api.example.com/problems/malformed-request
+        title: Malformed request body
+        status: 400
+        detail: The request body is not valid JSON.
+        instance: /v1/submissions
+        traceId: 6e0c63257de34c92bf9efcd03927272e
+
+    ProblemBusinessRuleViolation:
+      summary: Business rules failed
+      value:
+        type: https://api.example.com/problems/business-rule-violation
+        title: Submission violates a business rule
+        status: 422
+        detail: The submission is well-formed but cannot be accepted.
+        instance: /v1/submissions
+        traceId: a1c3e5f7092b4d6e8f10213243546576
+        errors:
+          - pointer: /effectiveDate
+            detail: Effective date 2026-09-01 is in the past.
+          - pointer: /classOfBusiness/naicsCode
+            detail: NAICS 213111 (Drilling Oil and Gas Wells) is outside appetite for this product.
+
+    ProblemIdempotencyKeyReuse:
+      summary: Idempotency key reused with a different body
+      value:
+        type: https://api.example.com/problems/idempotency-key-reuse
+        title: Idempotency key reused with a different request
+        status: 422
+        detail: Idempotency-Key 7c9e6679-7425-40de-944b-e07fc1f90ae7 was already used with a different request body.
+        instance: /v1/submissions
+        traceId: 3d2c1b0a99887766554433221100ffee
+
+    ProblemIdempotencyConflict:
+      summary: Original request still in progress
+      value:
+        type: https://api.example.com/problems/idempotency-conflict
+        title: Request with this idempotency key is in progress
+        status: 409
+        detail: A request with Idempotency-Key 7c9e6679-7425-40de-944b-e07fc1f90ae7 is still being processed. Retry shortly.
+        instance: /v1/submissions
+        traceId: 9a8b7c6d5e4f30211203f4e5d6c7b8a9
+
+    ProblemUnauthenticated:
+      summary: Missing or invalid token
+      value:
+        type: https://api.example.com/problems/unauthenticated
+        title: Authentication required
+        status: 401
+        detail: The access token is missing or invalid.
+        instance: /v1/submissions
+        traceId: 1f2e3d4c5b6a79881726354453627180
+
+    ProblemNotFound:
+      summary: Unknown resource
+      value:
+        type: https://api.example.com/problems/not-found
+        title: Resource not found
+        status: 404
+        detail: No quote with ID 'qte_9f2KdL0x' was found.
+        instance: /v1/quotes/qte_9f2KdL0x
+        traceId: 0af7651916cd43dd8448eb211c80319c
+
+    ProblemNotAcceptable:
+      summary: Unsupported Accept header
+      value:
+        type: https://api.example.com/problems/not-acceptable
+        title: Not acceptable
+        status: 406
+        detail: This resource can only be represented as application/json.
+        instance: /v1/quotes/qte_01JB7QA2C3D4E5F6G7H8J9K0LM
+        traceId: 5c4b3a29180716253443526170819203
+
+    ProblemUnsupportedMediaType:
+      summary: Unsupported Content-Type
+      value:
+        type: https://api.example.com/problems/unsupported-media-type
+        title: Unsupported media type
+        status: 415
+        detail: Request bodies must be application/json.
+        instance: /v1/submissions
+        traceId: 7d6c5b4a39281706f5e4d3c2b1a09f8e
+
+    ProblemRateLimited:
+      summary: Too many requests
+      value:
+        type: https://api.example.com/problems/rate-limited
+        title: Rate limit exceeded
+        status: 429
+        detail: Too many requests. Retry after the time given in Retry-After.
+        instance: /v1/submissions
+        traceId: 2b3c4d5e6f708192a3b4c5d6e7f80910
+
+    ProblemInternalError:
+      summary: Unexpected error
+      value:
+        type: https://api.example.com/problems/internal-error
+        title: Internal server error
+        status: 500
+        detail: An unexpected error occurred. Quote the traceId when contacting support.
+        instance: /v1/submissions
+        traceId: e5f6a7b8c9d00112233445566778899a
+
+    ProblemServiceUnavailable:
+      summary: Temporarily unavailable
+      value:
+        type: https://api.example.com/problems/service-unavailable
+        title: Service unavailable
+        status: 503
+        detail: The service is temporarily unavailable. Retry after the time given in Retry-After.
+        instance: /v1/submissions
+        traceId: c0ffee00c0ffee00c0ffee00c0ffee00

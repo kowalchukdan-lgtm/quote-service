@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Quote API
-  version: 1.0.0
+  version: 1.0.1
   summary: Submit small-business general liability risks and receive quotes.
   description: |
     Brokers submit a small-business general liability (GL) risk as a **submission**,
@@ -408,7 +408,7 @@ components:
           type: string
           minLength: 1
           maxLength: 200
-          pattern: '\S'
+          pattern: '^[\s\S]*\S[\s\S]*$'
           description: Legal name of the insured. Must not be blank.
         address:
           $ref: '#/components/schemas/Address'

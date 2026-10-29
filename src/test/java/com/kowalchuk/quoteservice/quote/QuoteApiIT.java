@@ -407,7 +407,9 @@ class QuoteApiIT {
 		JsonNode problem = assertProblem(createQuote(submissionId), 422, "business-rule-violation",
 				"Submission violates a business rule");
 		assertThat(problem.at("/errors/0/pointer").asString()).isEmpty();
-		assertThat(problem.at("/errors/0/detail").asString()).contains(submissionId).contains("is in the past");
+		assertThat(problem.at("/errors/0/detail").asString())
+			.isEqualTo("Effective date " + today().minusDays(1) + " is in the past.");
+		assertThat(problem.get("instance").asString()).contains(submissionId);
 	}
 
 	@Test

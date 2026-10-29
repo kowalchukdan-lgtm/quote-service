@@ -42,7 +42,7 @@ class SubmissionRulesTest {
 	// Late in the UTC day, to show "today" is the UTC date.
 	private final Clock clock = Clock.fixed(Instant.parse("2026-10-23T23:59:00Z"), ZoneOffset.UTC);
 
-	private final SubmissionRules rules = new SubmissionRules(clock, naicsClasses, limitFactors);
+	private final SubmissionRules rules = new SubmissionRules(new EffectiveDateRule(clock), naicsClasses, limitFactors);
 
 	@BeforeEach
 	void naicsClasses() {

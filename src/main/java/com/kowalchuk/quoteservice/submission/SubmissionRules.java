@@ -3,7 +3,6 @@ package com.kowalchuk.quoteservice.submission;
 import java.math.BigDecimal;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
-import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -35,14 +34,15 @@ public class SubmissionRules {
 
 	private static final String ACCEPTED_COUNTRY = "US";
 
-	private final Clock clock;
+	private final EffectiveDateRule effectiveDateRule;
 
 	private final NaicsClassRepository naicsClasses;
 
 	private final LimitFactorRepository limitFactors;
 
-	public SubmissionRules(Clock clock, NaicsClassRepository naicsClasses, LimitFactorRepository limitFactors) {
-		this.clock = clock;
+	public SubmissionRules(EffectiveDateRule effectiveDateRule, NaicsClassRepository naicsClasses,
+			LimitFactorRepository limitFactors) {
+		this.effectiveDateRule = effectiveDateRule;
 		this.naicsClasses = naicsClasses;
 		this.limitFactors = limitFactors;
 	}
@@ -54,15 +54,13 @@ public class SubmissionRules {
 	public NaicsClass check(NewSubmission submission) {
 		List<FieldViolation> violations = new ArrayList<>();
 
-		// "Today" is the UTC date. Whether it should follow the broker's or the risk's
-		// time zone is an open question.
-		LocalDate today = LocalDate.now(clock);
+		// The past-date rule is shared with quoting; the 90-day window applies only here.
 		LocalDate effectiveDate = submission.effectiveDate();
-		if (effectiveDate.isBefore(today)) {
-			violations.add(new FieldViolation("/effectiveDate",
-					"Effective date " + effectiveDate + " is in the past."));
+		Optional<String> pastDate = effectiveDateRule.pastDateViolation(effectiveDate);
+		if (pastDate.isPresent()) {
+			violations.add(new FieldViolation("/effectiveDate", pastDate.get()));
 		}
-		else if (effectiveDate.isAfter(today.plusDays(MAX_DAYS_AHEAD))) {
+		else if (effectiveDate.isAfter(effectiveDateRule.today().plusDays(MAX_DAYS_AHEAD))) {
 			violations.add(new FieldViolation("/effectiveDate",
 					"Effective date " + effectiveDate + " is more than " + MAX_DAYS_AHEAD + " days ahead."));
 		}

@@ -1,76 +1,73 @@
 # Quote Service
 
-Brokers submit a small-business general liability risk as a **submission**, then request a
-**quote** for it. The API is contract-first: `src/main/resources/openapi/quote-api.yaml` is the
-source of truth, and the controllers implement interfaces generated from it.
+A reference implementation of a small-business general liability (GL) submission-to-quote API,
+built contract-first. A broker submits a risk; the service validates it, rates it against
+effective-dated reference data, and returns a quote that is priced, referred or declined. The
+OpenAPI document is the source of truth, every decision a quote depends on is stored with it, and
+the build enforces the test and design rules described below. Java 21, Spring Boot 4,
+PostgreSQL, Flyway.
 
-## Running
+## Why this exists
 
-- Start Postgres on `localhost:5432` with a `quotes` database (see `application.properties`).
-- `./mvnw spring-boot:run` starts the service; Flyway applies the migrations on startup.
-- `./mvnw verify` runs unit tests and the `*IT` integration tests. The database tests use
-  Testcontainers, so Docker must be running.
+I'm an engineering leader rebuilding hands-on skills. This is the kind of paved-road template I'd
+want teams to start from: a small, real domain with the design decisions written down and
+enforced by the build, not just described.
 
-## Tests and coverage
+## Architecture
 
-### Conventions
+```mermaid
+flowchart LR
+    client(["Broker / API client"]) -->|"HTTP + JSON"| controller
+    spec["quote-api.yaml"] -.->|"generates interfaces + DTOs"| controller
+    controller["Controllers<br/>(implement generated interfaces)"] --> mapper["Mappers<br/>(API DTOs ↔ domain)"]
+    controller --> service["Services<br/>(SubmissionService, QuoteService)"]
+    service --> rules["Business rules<br/>(SubmissionRules, EffectiveDateRule)"]
+    service --> engine["RatingEngine<br/>(plain Java)"]
+    service --> repo["Repositories<br/>(Spring Data JPA)"]
+    repo --> db[("PostgreSQL")]
+    flyway["Flyway migrations"] -->|"owns the schema"| db
+```
 
-All tests live in `src/test/java`; there are no per-layer source folders. The layer is set by
-the class name, and the build enforces it: Surefire runs `*Test` during `test`, and Failsafe runs
-`*IT` during `integration-test`/`verify` (configured by the Spring Boot parent).
+Errors from any layer are rendered by one `ProblemHandler` as RFC 9457 Problem Details.
 
-| Layer | Convention | What it's for | Runner | Docker |
-|---|---|---|---|---|
-| Unit | `*Test`; JUnit 5, AssertJ, Mockito; no Spring context | Business logic and edge cases, exhaustively and fast (`RatingEngineTest`, `SubmissionRulesTest`) | Surefire | No |
-| Slice | `*Test` + `@Tag("slice")` + `@WebMvcTest` | The web layer with services mocked: status codes, headers, Problem Details, validation (`ApiWebLayerTest`) | Surefire | No |
-| Integration | `*IT`; full context + `TestcontainersConfiguration` | Real wiring against a throwaway Postgres: SQL, migrations, transactions, end to end (`QuoteApiIT`) | Failsafe | Yes |
+## Key design decisions
 
-Slice and integration tests also check every response against `quote-api.yaml`
-(`OpenApiContract`). `RatingArchitectureTest` (ArchUnit) fails the build if the `rating`
-package, or its tests, depend on Spring, JPA, the database, or the JPA-backed application
-packages, so the pricing engine stays plain Java.
+- **Contract-first.** Controllers implement interfaces generated from
+  [`quote-api.yaml`](src/main/resources/openapi/quote-api.yaml), with default methods disabled,
+  so a missing operation on an implemented interface fails compilation instead of returning 501;
+  `ContractCoverageIT` catches operations under interfaces nobody implements.
+- **Anchored patterns.** Every regex in the contract is anchored (`^…$`), so it validates the
+  whole value; JSON Schema patterns are unanchored by default.
+- **Flyway owns the schema; Hibernate only validates it** (`ddl-auto=validate`). Merged
+  migrations are never edited.
+- **API model separate from entities.** Generated DTOs never reach the services; mappers are the
+  only classes that know both.
+- **400 versus 422.** Schema errors are `400 validation-error`; valid requests that break a
+  business rule are `422 business-rule-violation`. All violations are returned together, as
+  Problem Details with JSON Pointers.
+- **Appetite and rates are reference data**, not code: NAICS appetite, base rates, limit factors
+  and state minimum premiums live in tables.
+- **One home for every business rule.** Each rule is implemented once, for example appetite in
+  `NaicsClass`, the past-date rule in `EffectiveDateRule` (used at submission and at quote time),
+  pricing in `RatingEngine` and quote validity in `QuoteValidity`.
+- **Framework-free rating engine.** No Spring, JPA or database code; an ArchUnit test enforces
+  it.
+- **QUOTED, REFERRED and DECLINED are business results**, returned as `201`, not errors.
+- **Effective-dated, append-only rates with load timestamps.** Rate changes and corrections are
+  new rows; a database trigger blocks updates and deletes, so history is never rewritten. Rates
+  are selected by the policy effective date, not the quote date.
+- **Every quote stores the rate rows it consulted**, whatever its outcome, plus its rating inputs,
+  so any quote can be explained later from stored data.
+- **Rounding in one named place.** `RatingEngine.PREMIUM_ROUNDING` (half-up to cents, once, at
+  the end); everywhere else uses `RoundingMode.UNNECESSARY`, which fails rather than rounds.
+- **Expiry derived at read time** from `expiresAt` and an injected `Clock`; `EXPIRED` is never
+  stored.
+- **`Cache-Control: no-store` on quote responses**, because a quote's status can change with time
+  alone.
 
-Integration tests never touch your local database: Testcontainers starts a fresh
-`postgres:17-alpine` container on a random port and points the tests at it.
+## Fictional rating
 
-### Which command runs which tests
-
-| Command | Runs | Docker | Coverage |
-|---|---|---|---|
-| `./mvnw test` | Unit + slice (Surefire) | No | Unit report, no gate |
-| `./mvnw test -DexcludedGroups=slice` | Unit only | No | — |
-| `./mvnw test -Dgroups=slice` | Slice only | No | — |
-| `./mvnw test -Dtest=RatingEngineTest` | One test class | No | — |
-| `./mvnw verify` | Everything: Surefire, then Failsafe | Yes | Both reports and both gates |
-| `./mvnw verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=QuoteApiIT` | One integration test class | Yes | Partial: the gates aren't meaningful |
-
-### Coverage reports and gates
-
-JaCoCo writes two reports:
-
-- `target/site/jacoco-unit/index.html`: Surefire tests only (unit + slice).
-- `target/site/jacoco-combined/index.html`: Surefire and Failsafe data merged.
-
-`./mvnw verify` fails the build if either rule isn't met:
-
-- **Rating package ≥ 90% line coverage from unit tests alone**, so the pricing logic is proven by
-  fast, focused tests.
-- **Overall ≥ 80% line coverage on the combined data.**
-
-The OpenAPI-generated code (`com.kowalchuk.quoteservice.api`) is excluded; everything hand-written
-counts. Reports are written before the checks, so a failed build still leaves both to inspect.
-
-The gates run only when the build reaches `verify` (`verify`, `install`, `deploy`), not on `test`
-or `package`. They are bypassed by `-DskipTests` (no coverage data, so the checks are skipped),
-`-Djacoco.skip=true`, and `-DskipITs` (the combined report then has only unit data). CI should run
-`./mvnw verify` with none of these.
-
-The JaCoCo agent is attached through the `argLine` property. To add JVM options for tests, write
-`<argLine>@{argLine} …</argLine>`; replacing `argLine` silently drops coverage to zero.
-
-## Rating (fictional)
-
-> **The rating formula, rates, factors and rules here are illustrative only. They are not
+> **The rating formula, rates and NAICS appetite are fictional and simplified. They are not
 > actuarially derived and must not be used for real underwriting.**
 
 ```
@@ -87,244 +84,174 @@ rounded half-up to cents, once, at the end.
 | 541511 Custom Computer Programming Services | 0.6000 | 10,000,000 |
 | 812111 Barber Shops | 1.4000 | 1,000,000 |
 
-Limit factors: 1,000,000 / 2,000,000 → 1.0000; 2,000,000 / 4,000,000 → 1.3500.
-State minimum premiums: 500.00, except CA 650.00, FL 600.00 and NY 750.00. Minimums vary by
-state because rates are filed with, and approved by, each state's regulator.
+213111 (Drilling Oil and Gas Wells) is outside appetite. Limit factors: 1,000,000 / 2,000,000 →
+1.0000; 2,000,000 / 4,000,000 → 1.3500. State minimum premiums: 500.00, except CA 650.00, FL
+600.00 and NY 750.00; they vary by state because rates are filed with each state's regulator.
+The rating state is the risk address's state.
 
 Outcomes, in order of precedence:
 
 1. **DECLINED** `CLASS_NOT_WRITTEN`: the class has left appetite since the submission was made.
 2. **REFERRED**, with every reason that applies: `NO_RATE_FOR_CLASS`, `LIMIT_NOT_RATED` or
-   `NO_MINIMUM_FOR_STATE` (no row in effect), or `REVENUE_ABOVE_AUTO_LIMIT` (revenue above the
-   class's ceiling). Reason messages state the values compared.
+   `NO_MINIMUM_FOR_STATE` (no row in effect), or `REVENUE_ABOVE_AUTO_LIMIT`.
 3. **QUOTED** otherwise, with the factors applied (`CLASS`, then `LIMIT`).
 
-Declined and referred quotes are business outcomes, returned with `201`, not errors.
+In production, rounding rules (mode, precision, and whether any intermediate rounding applies)
+come from the filed rating manual. The contract's examples (`TERRITORY` and `REVENUE_BAND`
+factors, a premium of 2847.50) illustrate the open set of factor codes; this implementation
+doesn't produce them.
 
-The contract's examples (`TERRITORY` and `REVENUE_BAND` factors, a premium of 2847.50)
-illustrate the open set of factor codes; this implementation doesn't produce them.
+How rates are selected, how to change or correct them, and how to explain any stored quote:
+[docs/rating-data.md](docs/rating-data.md).
 
-**Rounding.** In production, rounding rules (mode, precision, and whether any intermediate
-rounding applies) come from the filed rating manual. This reference implementation rounds
-half-up to cents once, at the end of rating; all intermediate steps are exact, and no other code
-path rounds. `RatingEngine` holds the one `HALF_UP`; everything else uses
-`RoundingMode.UNNECESSARY`, which fails rather than rounds.
+## API overview
 
-## Which rates apply
+Full contract: [`src/main/resources/openapi/quote-api.yaml`](src/main/resources/openapi/quote-api.yaml).
 
-Rates are selected by the **policy effective date on the submission, not the date of the
-quote**. A rate filing applies to policies effective on or after its date, and a quote can be
-requested up to 90 days before cover starts, so a December quote for a January policy uses
-January's rates. Quoting the same submission twice gives the same rates whenever you ask.
+| Method and path | Purpose | Main responses |
+|---|---|---|
+| `POST /v1/submissions` | Submit a risk | `201`, `400`, `415`, `422` |
+| `GET /v1/submissions/{submissionId}` | Read a submission | `200`, `404` |
+| `POST /v1/submissions/{submissionId}/quotes` | Rate it and create a quote | `201` (`QUOTED`, `REFERRED` or `DECLINED`), `404`, `422` |
+| `GET /v1/quotes/{quoteId}` | Read a quote | `200`, `404` |
 
-Base rates, limit factors and state minimums live in effective-dated, append-only tables. The
-row in effect is the one with the latest `effective_from` on or before the policy date; for rows
-sharing that date, the most recently loaded one (so a correction wins). One shared method,
-`EffectiveDatedRepository.findInEffect`, implements this for all three tables.
+- Errors are `application/problem+json` with a stable `type`, a `traceId`, and `errors[]`
+  pointers for `400` and `422`.
+- A quote is valid for exactly 30 × 24 hours from `createdAt` (`expiresAt`, UTC), not "through
+  the end of the 30th day". From that instant, `GET` returns it as `EXPIRED`, with the premium
+  kept for the record. Show `expiresAt` in the viewer's local time, including the time of day.
+- Quote responses carry `Cache-Control: no-store`: rely on `status` and `expiresAt` from a fresh
+  response, never a cached copy.
+- The contract declares bearer authentication, rate limiting and idempotency keys; these aren't
+  implemented yet (see [Deferred](#deferred)).
 
-Rate rows can't be changed from application code: the repositories expose no write methods, the
-entities are immutable, and a database trigger rejects `UPDATE` and `DELETE` from any client.
+## Running locally
 
-Every quote, whatever its outcome, records:
+Prerequisites: Java 21 and Docker. Maven comes with the wrapper (`./mvnw`).
 
-- the IDs of the rate rows it consulted (`class_rate_id`, `limit_factor_id`,
-  `rating_state_id`; null means no row was in effect);
-- its rating inputs and lookup keys (`rated_as_of`, `rated_naics_code`, `rated_state_code`,
-  the limits and revenue);
-- the factors as charged (`quote_rating_factors`), the minimum premium used and whether it
-  applied, and `rating_plan_version` (the formula version).
+1. Start Postgres:
 
-## Which state applies
+   ```bash
+   docker run -d --name quote-db -e POSTGRES_PASSWORD=devpass -e POSTGRES_DB=quotes -p 5432:5432 postgres:17
+   ```
 
-The rating state, used for the state minimum premium, is the **risk address's state**
-(`address.region`). The address is the risk location, not a mailing or head-office address.
-Each submission has one location, so multi-state risks are not supported (see Deferred).
+2. Start the service; Flyway applies the migrations on startup:
 
-## Explaining a quote
+   ```bash
+   ./mvnw spring-boot:run
+   ```
 
-Each outcome can be explained from the quote and the rows it references.
+   The datasource defaults match the container above. Set `DB_URL`, `DB_USERNAME` and
+   `DB_PASSWORD` to use another database; the defaults are for local development only.
 
-Priced: recompute the premium.
+3. Try it. Each command is a single line; run them in order in the same terminal (needs `jq`):
 
-```sql
-SELECT q.premium_amount,
-       round(greatest(q.rated_annual_revenue / 1000 * c.base_rate_per_thousand * l.factor,
-                      q.minimum_premium), 2) AS recomputed
-FROM quotes q
-JOIN class_rates c   ON c.id = q.class_rate_id
-JOIN limit_factors l ON l.id = q.limit_factor_id
-WHERE q.id = :quote_id;
-```
+   ```bash
+   BASE=http://localhost:8080; EFFECTIVE=$(date -v+7d +%F 2>/dev/null || date -d '+7 days' +%F); SUBMISSION_ID=$(curl -s -X POST "$BASE/v1/submissions" -H 'Content-Type: application/json' -d '{"businessName":"Lone Star Smokehouse LLC","address":{"line1":"1200 Congress Ave","city":"Austin","region":"TX","postalCode":"78701","country":"US"},"classOfBusiness":{"naicsCode":"722511"},"annualRevenue":{"amount":"1200000.00","currency":"USD"},"requestedLimit":{"perOccurrence":{"amount":"1000000.00","currency":"USD"},"aggregate":{"amount":"2000000.00","currency":"USD"}},"effectiveDate":"'"$EFFECTIVE"'"}' | jq -r .id); echo "SUBMISSION_ID=$SUBMISSION_ID"
+   ```
 
-Referred above the ceiling: the stored revenue exceeds the referenced row's ceiling.
+   ```bash
+   QUOTE_ID=$(curl -s -X POST "$BASE/v1/submissions/$SUBMISSION_ID/quotes" | tee /dev/tty | jq -r .id); echo; echo "QUOTE_ID=$QUOTE_ID"
+   ```
 
-```sql
-SELECT q.rated_annual_revenue, c.max_auto_revenue
-FROM quotes q JOIN class_rates c ON c.id = q.class_rate_id
-WHERE q.id = :quote_id;
-```
+   ```bash
+   curl -s -i "$BASE/v1/quotes/$QUOTE_ID"; echo
+   ```
 
-No rate in effect: no row for the stored class was in effect on the rating date **and already
-loaded** when the quote read the rates. This stays true even if a backdated row or a
-correction is inserted later.
+   ```bash
+   curl -s -i -X POST "$BASE/v1/submissions/sub_DOESNOTEXIST/quotes"; echo
+   ```
 
-```sql
-SELECT count(*)
-FROM quotes q
-JOIN class_rates c ON c.naics_code = q.rated_naics_code
-                  AND c.effective_from <= q.rated_as_of
-                  AND c.loaded_at <= q.rates_read_at
-WHERE q.id = :quote_id;   -- 0
-```
+   Expect a `QUOTED` quote at 2520.00 USD, the same quote with `Cache-Control: no-store`, and a
+   `404` Problem Details response for the unknown submission.
 
-## Clocks
+## Testing
 
-Database timestamps (`loaded_at`, `rates_read_at`) are only compared with each other;
-application timestamps (`created_at`, `expires_at`, the injected `Clock`) are only compared with
-each other. Where a quote found a rate row, its stored row ID is the evidence and no timestamp is
-compared. `rates_read_at` is set by the database in the same transaction as the rate lookups, and
-exists only to prove that *no* row was in effect when a quote had nothing to point at.
+All tests live in `src/test/java`; the class name sets the layer, and the build enforces it:
+Surefire runs `*Test` during `test`, and Failsafe runs `*IT` during `integration-test`/`verify`.
 
-This relies on rate rows being loaded by Flyway migrations, which run before the service accepts
-requests, so no rate load overlaps a quote.
+| Layer | Convention | What it's for | Docker |
+|---|---|---|---|
+| Unit | `*Test`; JUnit 5, AssertJ, Mockito; no Spring context | Business logic and edge cases, exhaustively and fast (`RatingEngineTest`, `SubmissionRulesTest`) | No |
+| Slice | `*Test` + `@Tag("slice")` + `@WebMvcTest` | The web layer with services mocked: status codes, headers, Problem Details, validation (`ApiWebLayerTest`) | No |
+| Integration | `*IT`; full context + Testcontainers Postgres | Real wiring against a throwaway database: SQL, migrations, transactions, end to end (`QuoteApiIT`) | Yes |
 
-## Quote expiry
+- Slice and integration tests also check every response against `quote-api.yaml`
+  (`OpenApiContract`).
+- `RatingArchitectureTest` (ArchUnit) fails the build if the `rating` package, or its tests,
+  depend on Spring, JPA, the database, or the JPA-backed application packages.
+- Integration tests never touch your local database: Testcontainers starts a fresh
+  `postgres:17-alpine` container on a random port.
 
-A quote is valid for exactly 30 × 24 hours from `createdAt`, as an instant (`expiresAt`, UTC).
-It is not "through the end of the 30th day". Example: created 2026-10-23T14:05:13Z → expires
-2026-11-22T14:05:13Z. In Chicago that's 9:05 am CDT on Oct 23 to 8:05 am CST on Nov 22: the
-same 720 hours, with the local clock moved for daylight saving. Show `expiresAt` in the viewer's
-local time, including the time of day.
+| Command | Runs | Docker | Coverage |
+|---|---|---|---|
+| `./mvnw test` | Unit + slice | No | Unit report, no gate |
+| `./mvnw test -DexcludedGroups=slice` | Unit only | No | — |
+| `./mvnw test -Dgroups=slice` | Slice only | No | — |
+| `./mvnw test -Dtest=RatingEngineTest` | One test class | No | — |
+| `./mvnw verify` | Everything: Surefire, then Failsafe | Yes | Both reports and both gates |
+| `./mvnw verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=QuoteApiIT` | One integration test class | Yes | Partial: the gates aren't meaningful |
 
-A quote is valid only while the current time is **before** `expiresAt`. From that exact instant,
-`GET` returns it as `EXPIRED` (still `200`, with the premium kept for the record). The rule lives
-in one place, `QuoteValidity`, and the current time always comes from the application's injected
-clock, never from the database's `now()`.
+**Coverage gates (JaCoCo).** `./mvnw verify` fails the build unless the `rating` package has
+≥ 90% line coverage from unit tests alone and the code base has ≥ 80% line coverage on unit and
+integration data combined. Reports: `target/site/jacoco-unit/` and
+`target/site/jacoco-combined/`, written before the checks so a failed build still leaves both.
+Generated code (`com.kowalchuk.quoteservice.api`) is excluded. The gates are bypassed by
+`-DskipTests`, `-Djacoco.skip=true` and `-DskipITs`, so CI should use none of them. The JaCoCo
+agent uses the `argLine` property: to add test JVM options, write `<argLine>@{argLine} …</argLine>`.
 
-**Clients should rely on `status` and `expiresAt` from a fresh response, never a cached copy.**
-Quote responses carry `Cache-Control: no-store` because a quote can change from `QUOTED` to
-`EXPIRED` with no change to its data.
+**IDE note.** VS Code's Java extension (and Eclipse) build into `target-ide/`, via the `ide`
+profile in `pom.xml`, so they never collide with Maven's `target/`. After pulling this change,
+run "Java: Clean Java Language Server Workspace" once.
 
-## Changing a rate
+## Roadmap
 
-Add a Flyway migration that inserts new rows dated for the filing, and deploy it as soon as the
-filing is approved. Any time before the effective date works; future-dated rows have no effect on
-earlier policies. Add rows only for values that change.
+Planned; none of this has started.
 
-```sql
--- V4__q1_2027_rate_filing.sql (fictional)
--- Applies to policies effective on or after 2027-01-01. Earlier policies keep the 2026 rows.
-INSERT INTO class_rates (naics_code, effective_from, base_rate_per_thousand, max_auto_revenue)
-VALUES ('722511', DATE '2027-01-01', 2.2500, 5000000.00);
-
-INSERT INTO rating_states (state_code, effective_from, minimum_premium)
-VALUES ('NY', DATE '2027-01-01', 800.00);
-```
-
-- **Timing (a suggestion, not a requirement):** where the filing timeline allows, load rows
-  about 90 days before their effective date, which matches how far ahead submissions can start
-  (`SubmissionRules.MAX_DAYS_AHEAD`). Then every policy on or after that date is quoted on the
-  new rate. State approvals often arrive later than that, so later loading is normal and
-  supported.
-- **When rows are loaded later:** quotes created before the load, for policies effective on or
-  after the new date, were priced on the previous row. They stay valid records of what was
-  offered; whether to re-quote them is a business decision. This query lists them using row IDs
-  only, with no timestamps: if the new row had existed, the lookup would have chosen it.
-
-  ```sql
-  SELECT q.id, q.status, q.premium_amount
-  FROM quotes q
-  JOIN class_rates new_row ON new_row.id = :new_row_id
-  WHERE q.rated_naics_code = new_row.naics_code
-    AND q.rated_as_of >= new_row.effective_from
-    AND q.class_rate_id = :superseded_row_id;
-  ```
-
-Never edit a merged migration: Flyway checksums applied migrations, and an edited one is never
-re-run on databases that already applied it. Fix forward with a new version.
-
-## Correcting a rate
-
-When a rate row is wrong (it doesn't match the filing), insert a **correction row with the same
-key and `effective_from`**, with `corrects_id` and a `correction_reason`.
-
-- Don't use a later-dated row: that leaves policies between the two dates on the wrong rate.
-- Don't update the row: quotes that used it would point at values they weren't priced on.
-
-```sql
--- V4__correct_722511_base_rate.sql (fictional)
--- Correction: NAICS 722511 base rate from 2026-01-01 was loaded as 2.1000 in V3;
--- the approved filing (ref <filing-id>) says 2.0100. Ceiling unchanged.
-INSERT INTO class_rates (naics_code, effective_from, base_rate_per_thousand, max_auto_revenue,
-                         corrects_id, correction_reason)
-SELECT naics_code, effective_from, 2.0100, max_auto_revenue,
-       id, 'Data-entry error in V3: filed base rate is 2.0100 (filing <filing-id>)'
-FROM class_rates
-WHERE naics_code = '722511' AND effective_from = DATE '2026-01-01'
-ORDER BY loaded_at DESC
-LIMIT 1;   -- the row currently in effect for that date (original or an earlier correction)
-```
-
-The database only allows a correction of a row with the same key and effective date, and
-requires a reason. After the migration runs, new quotes for every affected policy date use the
-corrected row. Quotes already priced keep pointing at the original row and keep their premium,
-as accurate records of what was offered.
-
-List the affected quotes, across every outcome (a wrong ceiling can wrongly refer some risks and
-wrongly quote others):
-
-```sql
-SELECT q.id, q.status, q.premium_amount, q.created_at
-FROM quotes q
-WHERE q.class_rate_id = (SELECT corrects_id FROM class_rates WHERE id = :correction_id);
-```
-
-What to do with them (re-quote, contact brokers, or let unbound quotes expire) is a business and
-compliance decision: quoting a rate other than the filed one can be a regulatory matter, so the
-code doesn't decide. Once binding exists, corrections affecting bound policies will need their
-own process.
+- Deployment to Azure Container Apps with GitHub Actions.
+- An Angular front end for brokers.
+- Cosmos DB for raw submissions as received.
+- AI-assisted extraction of submission data from documents.
 
 ## Deferred
 
-- New business versus renewal rating.
-- Rate changes loaded by business users instead of migrations. Loading while the service runs
+Known gaps and decisions left open, recorded rather than hidden:
+
+- **Idempotency enforcement.** The `Idempotency-Key` header is validated but not honoured; a
+  retry creates a duplicate (TODOs in both controllers, and a test records today's behaviour).
+- **Authentication and broker scoping.** The contract declares bearer tokens, and that a broker
+  gets `404` for another broker's resources; neither is implemented.
+- **Rate limiting (`429`) and `503` handling**, declared in the contract.
+- **Tracing.** `TraceIdFilter` is a stand-in until Micrometer Tracing.
+- **Blank business names.** A name made only of non-breaking spaces is accepted (Java's `\s` is
+  ASCII-only, unlike the contract's ECMAScript regex); a test records this gap.
+- **New business versus renewal rating.**
+- **Rate changes loaded by business users instead of migrations.** Loading while the service runs
   breaks the assumption that no rate load overlaps a quote, so loads would need to be published
-  atomically (staged, then made visible in one statement with a commit-time `published_at`) to
-  keep `loaded_at <= rates_read_at` evidence exact.
-- Multi-location / multi-state risks. This needs a contract change (a list of locations, each
-  with its share of revenue; likely `/v2`), rating per location with each state's rates, and
-  per-location rows in the audit trail. **Open question for underwriting/compliance:** how
-  minimum premiums apply across states (a minimum per state on that state's portion, or one
-  policy-level minimum such as the highest state's). It shouldn't be decided in code.
-- Withdrawing a rate or limit pair (needs an end date or a "withdrawn" row).
-- Per-class exposure bases (payroll, square footage) with `exposure_base` / `rate_unit` columns.
-- Other per-state values (state factors, taxes and fees).
-- Validating `address.region` against real state codes at submission time.
-- Idempotency-Key storage, for submissions and quotes.
-- **Downstream rounding and reconciliation** (once binding, installments or ledger feeds exist).
-  Policy and accounting systems can round the same amount differently, by mode (HALF_UP vs
-  HALF_EVEN; platform defaults differ) and, more often, by *when* they round (round-then-sum vs
-  sum-then-round, daily vs monthly earning). It shows up as cent-level reconciliation breaks:
-  written premium vs ledger, installments that don't sum to the annual premium, commission
-  statements, premium tax by state, reinsurance bordereaux. Decisions to make then:
-  - the policy system is the system of record for premium; consumers post what they receive and
-    never re-rate;
-  - every split (installments, state/line allocation, commissions, cessions) uses an allocation
-    rule that preserves the total;
-  - each interface specification states its rounding mode, precision and rounding step;
-  - reconciliation uses tolerances and a rounding variance account.
+  atomically to keep the stored evidence exact.
+- **Multi-location / multi-state risks.** This needs a contract change (a list of locations, each
+  with its share of revenue; likely `/v2`), rating per location, and per-location audit rows.
+  **Open question for underwriting/compliance:** how minimum premiums apply across states.
+- **Withdrawing a rate or limit pair** (needs an end date or a "withdrawn" row).
+- **Per-class exposure bases** (payroll, square footage) with `exposure_base` / `rate_unit`
+  columns.
+- **Other per-state values** (state factors, taxes and fees).
+- **Validating `address.region`** against real state codes at submission time.
+- **Downstream rounding and reconciliation** (once binding, installments or ledger feeds exist):
+  the policy system is the system of record for premium; every split uses an allocation rule
+  that preserves the total; each interface states its rounding mode, precision and step; and
+  reconciliation uses tolerances and a rounding variance account.
 - **Business time zone** (one decision covering two rules): whether quotes should be valid
-  through the end of the 30th calendar day, and whether "today" for the effective-date check
-  should be local rather than UTC, and in which zone (a single company zone, or the risk
-  location's zone, which needs ZIP-to-zone mapping). Changing expiry later is a behaviour change:
-  it alters `expiresAt` values and the contract example.
-- Expiry capped at the policy effective date.
-- **Quote validity period varying by state or product** → effective-dated, append-only reference
-  data, selected by the **quote creation date** (validity governs the offer, while rates govern
-  the policy). Until then it's a code constant: one product, no stated variation, and each quote
-  stores its `expiresAt`. A longer validity period widens the window in which a quote created
-  before a rate change can be bound at the old rate.
-- **Quote validity in SQL** (with the first feature that lists or binds quotes). Any query on
-  quote validity must be added to `QuoteValidity`, taking `now` from the injected clock, with a
-  test proving it agrees with the Java predicate one microsecond before, at and after
-  `expiresAt`. Binding must re-check validity atomically (row lock or conditional update).
+  through the end of the 30th calendar day, and whether "today" should be local rather than UTC,
+  and in which zone.
+- **Expiry capped at the policy effective date.**
+- **Quote validity period varying by state or product**: it would become effective-dated
+  reference data, selected by the quote creation date.
+- **Quote validity in SQL** (with the first feature that lists or binds quotes): any query must
+  be added to `QuoteValidity`, take `now` from the injected clock, and be tested against the
+  Java predicate; binding must re-check atomically.
+
+## Built with AI
+
+Developed with Claude Code, with every change reviewed by me in plan and manual modes. My first
+test (`RatingEngineTest.quotesStandardRiskAtExpectedPremium_handWritten`) was written by hand.

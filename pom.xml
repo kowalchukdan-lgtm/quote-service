@@ -313,4 +313,25 @@
 		</plugins>
 	</build>
 
+	<profiles>
+		<profile>
+			<!--
+				Eclipse-based IDEs (VS Code's Java extension, Eclipse, STS) build continuously in the
+				background and set the m2e.version property. Without this profile they write into
+				target/ while ./mvnw clean verify is deleting and rebuilding it, which causes
+				"Unresolved compilation problems" and NoClassDefFoundError. The IDE gets its own
+				folder (including its own generated OpenAPI sources); Maven never sees this profile.
+			-->
+			<id>ide</id>
+			<activation>
+				<property>
+					<name>m2e.version</name>
+				</property>
+			</activation>
+			<build>
+				<directory>${project.basedir}/target-ide</directory>
+			</build>
+		</profile>
+	</profiles>
+
 </project>

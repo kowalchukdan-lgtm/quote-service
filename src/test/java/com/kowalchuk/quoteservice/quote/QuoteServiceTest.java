@@ -25,6 +25,7 @@ import com.kowalchuk.quoteservice.reference.ClassRateRepository;
 import com.kowalchuk.quoteservice.reference.LimitFactorRepository;
 import com.kowalchuk.quoteservice.reference.RatingStateRepository;
 import com.kowalchuk.quoteservice.submission.Address;
+import com.kowalchuk.quoteservice.submission.EffectiveDateRule;
 import com.kowalchuk.quoteservice.submission.Money;
 import com.kowalchuk.quoteservice.submission.NaicsClass;
 import com.kowalchuk.quoteservice.submission.NewSubmission;
@@ -42,6 +43,8 @@ class QuoteServiceTest {
 
 	private static final LocalDate TODAY = LocalDate.of(2026, 10, 23);
 
+	private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+
 	private final SubmissionRepository submissions = mock(SubmissionRepository.class);
 
 	private final RatingEngine engine = mock(RatingEngine.class);
@@ -50,7 +53,7 @@ class QuoteServiceTest {
 
 	private final QuoteService service = new QuoteService(submissions, mock(ClassRateRepository.class),
 			mock(LimitFactorRepository.class), mock(RatingStateRepository.class), engine, quotes, new IdGenerator(),
-			Clock.fixed(NOW, ZoneOffset.UTC));
+			new EffectiveDateRule(CLOCK), CLOCK);
 
 	@Test
 	void pastEffectiveDateIsABusinessRuleViolationAndNothingIsRated() {
@@ -62,7 +65,7 @@ class QuoteServiceTest {
 		assertThat(ex).isNotNull();
 		assertThat(ex.getViolations()).singleElement().satisfies(violation -> {
 			assertThat(violation.pointer()).isEmpty();
-			assertThat(violation.detail()).contains("sub_PAST").contains("2026-10-22").contains("is in the past");
+			assertThat(violation.detail()).isEqualTo("Effective date 2026-10-22 is in the past.");
 		});
 		verifyNoInteractions(engine, quotes);
 	}

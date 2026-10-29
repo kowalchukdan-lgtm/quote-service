@@ -24,6 +24,7 @@ import com.kowalchuk.quoteservice.reference.LimitFactor;
 import com.kowalchuk.quoteservice.reference.LimitFactorRepository;
 import com.kowalchuk.quoteservice.reference.RatingState;
 import com.kowalchuk.quoteservice.reference.RatingStateRepository;
+import com.kowalchuk.quoteservice.submission.EffectiveDateRule;
 import com.kowalchuk.quoteservice.submission.Submission;
 import com.kowalchuk.quoteservice.submission.SubmissionNotFoundException;
 import com.kowalchuk.quoteservice.submission.SubmissionRepository;
@@ -54,11 +55,13 @@ public class QuoteService {
 
 	private final IdGenerator idGenerator;
 
+	private final EffectiveDateRule effectiveDateRule;
+
 	private final Clock clock;
 
 	public QuoteService(SubmissionRepository submissions, ClassRateRepository classRates,
 			LimitFactorRepository limitFactors, RatingStateRepository ratingStates, RatingEngine engine,
-			QuoteRepository quotes, IdGenerator idGenerator, Clock clock) {
+			QuoteRepository quotes, IdGenerator idGenerator, EffectiveDateRule effectiveDateRule, Clock clock) {
 		this.submissions = submissions;
 		this.classRates = classRates;
 		this.limitFactors = limitFactors;
@@ -66,6 +69,7 @@ public class QuoteService {
 		this.engine = engine;
 		this.quotes = quotes;
 		this.idGenerator = idGenerator;
+		this.effectiveDateRule = effectiveDateRule;
 		this.clock = clock;
 	}
 
@@ -74,13 +78,13 @@ public class QuoteService {
 		Submission submission = submissions.findById(submissionId)
 			.orElseThrow(() -> new SubmissionNotFoundException(submissionId));
 
-		// "Today" is the UTC date, as in SubmissionRules. A past effective date means the
-		// request cannot be processed; it says nothing about the risk, so it is not a decline.
+		// The same rule as at submission time. A past effective date means the request cannot be
+		// processed; it says nothing about the risk, so it is a 422, not a decline. The pointer is
+		// "" because a quote request has no body.
 		LocalDate effectiveDate = submission.getEffectiveDate();
-		if (effectiveDate.isBefore(LocalDate.now(clock))) {
-			throw new BusinessRuleViolationException(List.of(new FieldViolation("", "Effective date "
-					+ effectiveDate + " of submission " + submissionId + " is in the past; create a new submission.")));
-		}
+		effectiveDateRule.pastDateViolation(effectiveDate).ifPresent(message -> {
+			throw new BusinessRuleViolationException(List.of(new FieldViolation("", message)));
+		});
 
 		// Rates are selected by the policy effective date, not the date of the quote: a filing
 		// applies to policies effective on or after its date, and a quote can be requested up to

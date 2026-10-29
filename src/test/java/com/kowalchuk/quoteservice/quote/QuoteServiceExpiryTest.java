@@ -25,6 +25,7 @@ import com.kowalchuk.quoteservice.reference.LimitFactorRepository;
 import com.kowalchuk.quoteservice.reference.RatingState;
 import com.kowalchuk.quoteservice.reference.RatingStateRepository;
 import com.kowalchuk.quoteservice.submission.Address;
+import com.kowalchuk.quoteservice.submission.EffectiveDateRule;
 import com.kowalchuk.quoteservice.submission.Money;
 import com.kowalchuk.quoteservice.submission.NaicsClass;
 import com.kowalchuk.quoteservice.submission.NewSubmission;
@@ -41,6 +42,8 @@ class QuoteServiceExpiryTest {
 
 	private static final LocalDate EFFECTIVE_DATE = LocalDate.of(2026, 11, 1);
 
+	private static final Clock CLOCK = Clock.fixed(CREATED_AT, ZoneOffset.UTC);
+
 	private final SubmissionRepository submissions = mock(SubmissionRepository.class);
 
 	private final ClassRateRepository classRates = mock(ClassRateRepository.class);
@@ -52,7 +55,7 @@ class QuoteServiceExpiryTest {
 	private final QuoteRepository quotes = mock(QuoteRepository.class);
 
 	private final QuoteService service = new QuoteService(submissions, classRates, limitFactors, ratingStates,
-			new RatingEngine(), quotes, new IdGenerator(), Clock.fixed(CREATED_AT, ZoneOffset.UTC));
+			new RatingEngine(), quotes, new IdGenerator(), new EffectiveDateRule(CLOCK), CLOCK);
 
 	@BeforeEach
 	void rates() {

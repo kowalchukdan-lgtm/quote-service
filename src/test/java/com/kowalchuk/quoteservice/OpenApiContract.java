@@ -24,17 +24,20 @@ import com.networknt.schema.SchemaRegistry;
 import com.networknt.schema.SpecificationVersion;
 
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 import tools.jackson.dataformat.yaml.YAMLMapper;
 
 /**
  * Test-side view of {@code quote-api.yaml}: lists its operations and checks responses
- * against it. OpenAPI 3.1 schemas are JSON Schema 2020-12, so the spec document is
+ * (status, required headers, content type, body) against it. OpenAPI 3.1 schemas are JSON Schema 2020-12, so the spec document is
  * registered with a 2020-12 validator and schemas are addressed by JSON Pointer into it.
  */
 public final class OpenApiContract {
 
 	private static final String SPEC_URI = "https://quote-service.test/quote-api.json";
+
+	private static final JsonMapper JSON = JsonMapper.builder().build();
 
 	private static final Set<String> HTTP_METHODS = Set.of("get", "put", "post", "delete", "patch", "head",
 			"options", "trace");
@@ -104,6 +107,8 @@ public final class OpenApiContract {
 			response = spec.at(responsePointer);
 		}
 
+		assertRequiredHeaders(response, responsePointer, status, method, pathTemplate, result);
+
 		String contentType = result.getResponse().getContentType();
 		assertThat(contentType).as("response content type").isNotNull();
 		MediaType mediaType = MediaType.parseMediaType(contentType);
@@ -119,6 +124,31 @@ public final class OpenApiContract {
 		assertThat(errors).as("%d response from %s %s matches the contract schema; body: %s", status, method,
 				pathTemplate, body)
 			.isEmpty();
+	}
+
+	/**
+	 * Every header the contract marks {@code required: true} for this response must be present
+	 * and match its schema.
+	 */
+	private void assertRequiredHeaders(JsonNode response, String responsePointer, int status, String method,
+			String pathTemplate, MvcResult result) {
+		for (Map.Entry<String, JsonNode> entry : response.path("headers").properties()) {
+			String headerPointer = responsePointer + "/headers/" + escape(entry.getKey());
+			JsonNode header = entry.getValue();
+			if (header.has("$ref")) {
+				headerPointer = header.get("$ref").asString().substring(1);
+				header = spec.at(headerPointer);
+			}
+			if (!header.path("required").asBoolean(false)) {
+				continue;
+			}
+			String value = result.getResponse().getHeader(entry.getKey());
+			assertThat(value).as("required header %s on %d from %s %s", entry.getKey(), status, method, pathTemplate)
+				.isNotNull();
+			Schema schema = schemas.getSchema(SchemaLocation.of(SPEC_URI + "#" + headerPointer + "/schema"));
+			List<Error> errors = schema.validate(JSON.writeValueAsString(value), InputFormat.JSON);
+			assertThat(errors).as("header %s: %s matches the contract schema", entry.getKey(), value).isEmpty();
+		}
 	}
 
 	private static String contentAsString(MvcResult result) {

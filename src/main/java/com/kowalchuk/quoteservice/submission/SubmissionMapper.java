@@ -1,6 +1,7 @@
 package com.kowalchuk.quoteservice.submission;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
@@ -56,8 +57,9 @@ public class SubmissionMapper {
 	}
 
 	// Always two fractional digits and never exponent notation: "1200000" becomes "1200000.00".
+	// UNNECESSARY: amounts already have at most two decimals, so this never rounds.
 	private static MoneyDto toDto(Money money) {
-		return new MoneyDto(money.amount().setScale(2).toPlainString(), money.currency());
+		return new MoneyDto(money.amount().setScale(2, RoundingMode.UNNECESSARY).toPlainString(), money.currency());
 	}
 
 }

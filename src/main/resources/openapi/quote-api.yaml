@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Quote API
-  version: 1.0.1
+  version: 1.1.0
   summary: Submit small-business general liability risks and receive quotes.
   description: |
     Brokers submit a small-business general liability (GL) risk as a **submission**,
@@ -17,7 +17,7 @@ info:
     Changes that ship within v1 (minor version bump) are **additive only**:
     new endpoints, new optional request fields, new response fields, and new values
     for fields documented as extensible (`Quote.status`, `RatingFactor.code`,
-    `StatusReason.code`).
+    `StatusReason.code`). New response headers count as additive changes.
 
     Breaking changes (removing or renaming fields, changing types or meaning,
     tightening validation) are released as `/v2`, which runs alongside v1 for a
@@ -180,6 +180,8 @@ paths:
           headers:
             Location:
               $ref: '#/components/headers/Location'
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
           content:
             application/json:
               schema:
@@ -223,6 +225,9 @@ paths:
       responses:
         '200':
           description: The quote.
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
           content:
             application/json:
               schema:
@@ -299,6 +304,15 @@ components:
       schema:
         type: string
         format: uri-reference
+    CacheControlNoStore:
+      description: |
+        Always `no-store`. A quote's status can change from QUOTED to EXPIRED as time passes
+        without any change to its data, so responses must not be cached. Rely on `status`
+        and `expiresAt` from a fresh response.
+      required: true
+      schema:
+        type: string
+        const: no-store
     RetryAfter:
       description: Seconds to wait before retrying.
       schema:
@@ -531,7 +545,10 @@ components:
         expiresAt:
           type: string
           format: date-time
-          description: When the offer stops being bindable (UTC). Present only when `premium` is present.
+          description: |
+            The exact instant the offer stops being bindable: `createdAt` plus 30 × 24 hours (UTC).
+            Clients should display it in the viewer's local time, including the time of day, rather
+            than reducing it to a date. Present only when `premium` is present.
 
     Problem:
       type: object

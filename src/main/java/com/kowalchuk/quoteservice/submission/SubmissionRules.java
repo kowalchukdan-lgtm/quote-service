@@ -1,14 +1,20 @@
 package com.kowalchuk.quoteservice.submission;
 
 import java.math.BigDecimal;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
 
+import com.kowalchuk.quoteservice.reference.EffectiveDatedRepository;
+import com.kowalchuk.quoteservice.reference.LimitFactorRepository;
 import com.kowalchuk.quoteservice.web.BusinessRuleViolationException;
 import com.kowalchuk.quoteservice.web.FieldViolation;
 
@@ -21,23 +27,24 @@ import com.kowalchuk.quoteservice.web.FieldViolation;
 @Component
 public class SubmissionRules {
 
+	// How far ahead a policy can start. The README's "Changing a rate" section suggests loading
+	// new rates about this far ahead of their effective date, where the filing timeline allows.
 	static final int MAX_DAYS_AHEAD = 90;
 
 	private static final String ACCEPTED_CURRENCY = "USD";
 
 	private static final String ACCEPTED_COUNTRY = "US";
 
-	private static final List<LimitPair> OFFERED_LIMITS = List.of(
-			new LimitPair(new BigDecimal("1000000"), new BigDecimal("2000000")),
-			new LimitPair(new BigDecimal("2000000"), new BigDecimal("4000000")));
-
 	private final Clock clock;
 
 	private final NaicsClassRepository naicsClasses;
 
-	public SubmissionRules(Clock clock, NaicsClassRepository naicsClasses) {
+	private final LimitFactorRepository limitFactors;
+
+	public SubmissionRules(Clock clock, NaicsClassRepository naicsClasses, LimitFactorRepository limitFactors) {
 		this.clock = clock;
 		this.naicsClasses = naicsClasses;
+		this.limitFactors = limitFactors;
 	}
 
 	/**
@@ -74,12 +81,14 @@ public class SubmissionRules {
 			violations.add(new FieldViolation("/annualRevenue/amount", "Annual revenue must be greater than zero."));
 		}
 
+		// limit_factors is the only list of offered pairs: a pair is offered if it has a factor in
+		// effect on the policy effective date, so every accepted submission can be rated.
 		BigDecimal perOccurrence = submission.perOccurrenceLimit().amount();
 		BigDecimal aggregate = submission.aggregateLimit().amount();
-		if (OFFERED_LIMITS.stream().noneMatch(pair -> pair.matches(perOccurrence, aggregate))) {
-			violations.add(new FieldViolation("/requestedLimit",
-					"Limits " + perOccurrence.toPlainString() + " / " + aggregate.toPlainString()
-							+ " are not offered. Offered combinations: 1,000,000 / 2,000,000 and 2,000,000 / 4,000,000."));
+		List<LimitPair> offered = offeredLimits(effectiveDate);
+		if (offered.stream().noneMatch(pair -> pair.matches(perOccurrence, aggregate))) {
+			violations.add(new FieldViolation("/requestedLimit", "Limits " + perOccurrence.toPlainString() + " / "
+					+ aggregate.toPlainString() + " are not offered. " + describe(offered, effectiveDate)));
 		}
 
 		String naicsCode = submission.naicsCode();
@@ -106,12 +115,47 @@ public class SubmissionRules {
 		}
 	}
 
+	private List<LimitPair> offeredLimits(LocalDate effectiveDate) {
+		return limitFactors.findAll(EffectiveDatedRepository.effectiveOnOrBefore(effectiveDate))
+			.stream()
+			.map(factor -> new LimitPair(factor.getPerOccurrenceLimit(), factor.getAggregateLimit()))
+			.distinct()
+			.sorted(Comparator.comparing(LimitPair::perOccurrence).thenComparing(LimitPair::aggregate))
+			.toList();
+	}
+
+	private static String describe(List<LimitPair> offered, LocalDate effectiveDate) {
+		if (offered.isEmpty()) {
+			return "No limit combinations are offered for policies effective " + effectiveDate + ".";
+		}
+		List<String> pairs = offered.stream().map(LimitPair::label).toList();
+		String joined = (pairs.size() == 1) ? pairs.get(0)
+				: String.join(", ", pairs.subList(0, pairs.size() - 1)) + " and " + pairs.get(pairs.size() - 1);
+		return "Offered combinations: " + joined + ".";
+	}
+
 	private record LimitPair(BigDecimal perOccurrence, BigDecimal aggregate) {
 
-		// compareTo, not equals: 1000000 and 1000000.00 are the same limit.
+		// Normalised so equals (and distinct) treat 1000000 and 1000000.00 as the same limit.
+		LimitPair {
+			perOccurrence = perOccurrence.stripTrailingZeros();
+			aggregate = aggregate.stripTrailingZeros();
+		}
+
+		// compareTo, not equals: the requested amounts are not normalised.
 		boolean matches(BigDecimal requestedPerOccurrence, BigDecimal requestedAggregate) {
 			return perOccurrence.compareTo(requestedPerOccurrence) == 0
 					&& aggregate.compareTo(requestedAggregate) == 0;
+		}
+
+		// "1,000,000 / 2,000,000"
+		String label() {
+			return group(perOccurrence) + " / " + group(aggregate);
+		}
+
+		private static String group(BigDecimal amount) {
+			DecimalFormat format = new DecimalFormat("#,##0.##", DecimalFormatSymbols.getInstance(Locale.US));
+			return format.format(amount);
 		}
 
 	}

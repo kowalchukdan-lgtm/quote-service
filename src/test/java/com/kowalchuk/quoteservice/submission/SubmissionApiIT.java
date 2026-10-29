@@ -190,13 +190,6 @@ class SubmissionApiIT {
 	}
 
 	@Test
-	void unimplementedQuoteEndpointIsNotFound() throws Exception {
-		MvcResult result = perform(get("/v1/quotes/{quoteId}", "qte_X"), "GET", "/v1/quotes/{quoteId}");
-
-		assertProblem(result, 404, "not-found", "Resource not found");
-	}
-
-	@Test
 	void overlongIdempotencyKeyIsAValidationError() throws Exception {
 		MvcResult result = create(validRequest(), "k".repeat(256));
 

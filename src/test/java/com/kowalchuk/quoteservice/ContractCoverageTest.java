@@ -27,7 +27,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 class ContractCoverageTest {
 
 	/** Operations deliberately not implemented yet. Remove an entry when it ships. */
-	static final Set<String> NOT_YET_IMPLEMENTED = Set.of("createQuote", "getQuote");
+	static final Set<String> NOT_YET_IMPLEMENTED = Set.of();
 
 	@Autowired
 	@Qualifier("requestMappingHandlerMapping")

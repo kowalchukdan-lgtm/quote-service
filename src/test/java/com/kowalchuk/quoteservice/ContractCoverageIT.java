@@ -24,7 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
-class ContractCoverageTest {
+class ContractCoverageIT {
 
 	/** Operations deliberately not implemented yet. Remove an entry when it ships. */
 	static final Set<String> NOT_YET_IMPLEMENTED = Set.of();
@@ -60,7 +60,7 @@ class ContractCoverageTest {
 		return handlerMapping.getHandlerMethods()
 			.keySet()
 			.stream()
-			.flatMap(ContractCoverageTest::endpoints)
+			.flatMap(ContractCoverageIT::endpoints)
 			.collect(Collectors.toSet());
 	}
 

@@ -8,6 +8,8 @@ import java.time.LocalDate;
 
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import com.kowalchuk.quoteservice.rating.RatingResult.AppliedFactor;
 import com.kowalchuk.quoteservice.rating.RatingResult.Declined;
@@ -22,6 +24,41 @@ class RatingEngineTest {
 	private static final ClassRating RESTAURANTS = rating("2.1000", "5000000.00");
 
 	private final RatingEngine engine = new RatingEngine();
+
+	//Hand Written
+	@Test
+    void quotesStandardRiskAtExpectedPremium_handWritten() {
+        // Arrange
+        RatingEngine engine = new RatingEngine();
+
+        ClassRating classRating = new ClassRating(
+                new BigDecimal("2.0000"),        // baseRatePerThousand
+                new BigDecimal("5000000.00"));   // maxAutoRevenue
+
+        RatingInput input = new RatingInput(
+                new BigDecimal("1000000.00"),    // annualRevenue
+                "722511",                        // naicsCode: full-service restaurants
+                "PA",                            // stateCode
+                LocalDate.of(2026, 12, 1),       // ratingDate: the policy effective date
+                true,                            // classInAppetite
+                classRating,                     // classRating
+                new BigDecimal("1000000.00"),    // perOccurrenceLimit
+                new BigDecimal("2000000.00"),    // aggregateLimit
+                new BigDecimal("1.2500"),        // limitFactor
+                new BigDecimal("500.00"));       // minimumPremium
+
+        // Act
+        RatingResult result = engine.rate(input);   // check the method name in RatingEngine
+
+        // Assert: it's quoted, at the premium calculated by hand
+        assertThat(result).isInstanceOfSatisfying(RatingResult.Quoted.class, quoted -> {
+            assertThat(quoted.premium()).isEqualByComparingTo(new BigDecimal("2500.00"));
+            assertThat(quoted.premium().scale()).isEqualTo(2);
+            assertThat(quoted.minimumApplied()).isFalse();
+            assertThat(quoted.minimumPremium()).isEqualByComparingTo(new BigDecimal("500.00"));
+            assertThat(quoted.factors()).isNotEmpty();
+        });
+    }
 
 	@Test
 	void pricesTheContractsRestaurantExample() {
@@ -131,6 +168,84 @@ class RatingEngineTest {
 	@Test
 	void revenueEqualToTheCeilingIsQuoted() {
 		assertThat(engine.rate(input("5000000.00", RESTAURANTS, "1.0000", "500.00"))).isInstanceOf(Quoted.class);
+	}
+
+	/**
+	 * Every seeded class against both offered limit pairs at 1,000,000 revenue. The rates repeat
+	 * the V3 seed data on purpose, as hand-calculated golden values.
+	 */
+	@ParameterizedTest(name = "{0} at {2}/{3}: {5}")
+	@CsvSource({
+			"722511, 2.1000, 1000000.00, 2000000.00, 1.0000, 2100.00",
+			"722511, 2.1000, 2000000.00, 4000000.00, 1.3500, 2835.00",
+			"722513, 1.8000, 1000000.00, 2000000.00, 1.0000, 1800.00",
+			"722513, 1.8000, 2000000.00, 4000000.00, 1.3500, 2430.00",
+			"238220, 4.5000, 1000000.00, 2000000.00, 1.0000, 4500.00",
+			"238220, 4.5000, 2000000.00, 4000000.00, 1.3500, 6075.00",
+			"541511, 0.6000, 1000000.00, 2000000.00, 1.0000, 600.00",
+			"541511, 0.6000, 2000000.00, 4000000.00, 1.3500, 810.00",
+			"812111, 1.4000, 1000000.00, 2000000.00, 1.0000, 1400.00",
+			"812111, 1.4000, 2000000.00, 4000000.00, 1.3500, 1890.00" })
+	void pricesEverySeededClassAtBothLimits(String naicsCode, String baseRate, String perOccurrence, String aggregate,
+			String limitFactor, String expectedPremium) {
+		RatingInput input = new RatingInput(new BigDecimal("1000000.00"), naicsCode, "TX", RATING_DATE, true,
+				rating(baseRate, "10000000.00"), new BigDecimal(perOccurrence), new BigDecimal(aggregate),
+				new BigDecimal(limitFactor), new BigDecimal("500.00"));
+
+		Quoted quoted = quoted(input);
+
+		assertThat(quoted.premium()).isEqualTo(new BigDecimal(expectedPremium));
+		assertThat(quoted.premium().scale()).isEqualTo(2);
+		assertThat(quoted.factors()).extracting(AppliedFactor::code).containsExactly("CLASS", "LIMIT");
+		assertThat(quoted.factors().get(0).inputValue()).isEqualTo(naicsCode);
+		assertThat(quoted.factors().get(1).inputValue())
+			.isEqualTo(new BigDecimal(perOccurrence).toBigInteger() + "/" + new BigDecimal(aggregate).toBigInteger());
+	}
+
+	@ParameterizedTest(name = "revenue {0}: premium {1}, minimum applied {2}")
+	@CsvSource({
+			"499990.00, 500.00, true",
+			// 499.996 is below the minimum even though it would round to 500.00.
+			"499996.00, 500.00, true",
+			// Equal is not below.
+			"500000.00, 500.00, false",
+			"500010.00, 500.01, false" })
+	void minimumPremiumBoundary(String revenue, String expectedPremium, boolean expectedMinimumApplied) {
+		Quoted quoted = quoted(input(revenue, rating("1.0000", "5000000.00"), "1.0000", "500.00"));
+
+		assertThat(quoted.premium()).isEqualTo(new BigDecimal(expectedPremium));
+		assertThat(quoted.minimumApplied()).isEqualTo(expectedMinimumApplied);
+	}
+
+	@ParameterizedTest(name = "revenue {0} -> {1}")
+	@CsvSource({
+			// Tie, even kept digit: HALF_EVEN would give 1000.00.
+			"1000005.00, 1000.01",
+			// Tie, odd kept digit: both modes agree.
+			"1000015.00, 1000.02",
+			// Just below half a cent.
+			"1000004.99, 1000.00",
+			// Just above half a cent.
+			"1000005.01, 1000.01",
+			// Tiny raw value (0.00001): the minimum applies.
+			"0.01, 100.00" })
+	void roundsHalfUpToCents(String revenue, String expectedPremium) {
+		Quoted quoted = quoted(input(revenue, rating("1.0000", "5000000.00"), "1.0000", "100.00"));
+
+		assertThat(quoted.premium()).isEqualTo(new BigDecimal(expectedPremium));
+	}
+
+	@Test
+	void highPrecisionInputsAreExactUntilTheSingleRounding() {
+		// Expected value computed independently: an exact division, two multiplications, one rounding.
+		BigDecimal expected = new BigDecimal("1234567.89").divide(new BigDecimal("1000"))
+			.multiply(new BigDecimal("1.2345"))
+			.multiply(new BigDecimal("1.3333"))
+			.setScale(2, RoundingMode.HALF_UP);
+
+		Quoted quoted = quoted(input("1234567.89", rating("1.2345", "5000000.00"), "1.3333", "100.00"));
+
+		assertThat(quoted.premium()).isEqualTo(expected);
 	}
 
 	private Quoted quoted(RatingInput input) {

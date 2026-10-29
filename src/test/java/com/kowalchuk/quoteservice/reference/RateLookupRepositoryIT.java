@@ -30,7 +30,7 @@ import com.kowalchuk.quoteservice.TestcontainersConfiguration;
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
 @Transactional
-class RateLookupRepositoryTest {
+class RateLookupRepositoryIT {
 
 	private static final LocalDate ORIGINAL = LocalDate.of(2026, 1, 1);
 

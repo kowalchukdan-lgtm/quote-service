@@ -14,15 +14,19 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -149,7 +153,7 @@ class QuoteApiIT {
 	}
 
 	@Test
-	void classThatLeftAppetiteIsDeclinedButStillRecordsTheRateItConsulted() throws Exception {
+	void classThatLeftAppetiteIsDeclinedButStillRecordsTheRatesItConsulted() throws Exception {
 		testClass("999101");
 		long rate = classRate("999101", today().minusYears(1), "1.0000", "5000000.00", null);
 		String submissionId = submit(request -> naics(request, "999101"));
@@ -164,8 +168,38 @@ class QuoteApiIT {
 		assertThat(reasonCodes(quote)).containsExactly("CLASS_NOT_WRITTEN");
 		assertThat(quote.has("premium")).isFalse();
 		assertThat(quote.has("expiresAt")).isFalse();
-		assertThat(quoteRow(quote)).containsEntry("class_rate_id", rate);
 		assertNoStore(perform(get(QUOTE, quote.get("id").asString()), "GET", QUOTE));
+
+		// All three rate rows consulted are recorded, and each matches the stored lookup keys.
+		Map<String, Object> row = quoteRow(quote);
+		assertThat(row).containsEntry("class_rate_id", rate);
+		assertThat(row.get("limit_factor_id")).isNotNull();
+		assertThat(row.get("rating_state_id")).isNotNull();
+		assertThat(jdbc.queryForMap("SELECT per_occurrence_limit, aggregate_limit FROM limit_factors WHERE id = ?",
+				row.get("limit_factor_id")))
+			.containsEntry("per_occurrence_limit", row.get("rated_per_occurrence_limit"))
+			.containsEntry("aggregate_limit", row.get("rated_aggregate_limit"));
+		assertThat(stateOfRow(row.get("rating_state_id"))).isEqualTo(row.get("rated_state_code"));
+	}
+
+	/**
+	 * The database's CHECK constraints are the last line of defence for the quote invariants.
+	 * Each case changes one field of a valid row; the baseline is accepted.
+	 */
+	@ParameterizedTest(name = "{0}")
+	@CsvSource({ "QUOTED without a premium, ck_quotes_priced_iff_quoted",
+			"REFERRED with a premium, ck_quotes_priced_iff_quoted",
+			"QUOTED without a class rate row, ck_quotes_quoted_has_rate_rows",
+			"EXPIRED stored, ck_quotes_status",
+			"expiry equal to creation, ck_quotes_expiry_after_creation" })
+	void databaseRejectsInvalidQuotes(String invalidRow, String constraint) throws Exception {
+		String submissionId = submit(request -> {
+		});
+
+		assertThat(insertQuote(submissionId, "valid baseline")).isEqualTo(1);
+		assertThatExceptionOfType(DataIntegrityViolationException.class)
+			.isThrownBy(() -> insertQuote(submissionId, invalidRow))
+			.withMessageContaining(constraint);
 	}
 
 	@Test
@@ -464,6 +498,56 @@ class QuoteApiIT {
 		return jdbc.queryForObject("INSERT INTO class_rates (naics_code, effective_from, base_rate_per_thousand, "
 				+ "max_auto_revenue, corrects_id, correction_reason) VALUES (?, ?, ?::numeric, ?::numeric, ?, ?) "
 				+ "RETURNING id", Long.class, code, effectiveFrom, rate, ceiling, correctsId, reason);
+	}
+
+	/**
+	 * Inserts a quote row directly, bypassing the application, as a valid QUOTED row with one
+	 * field changed per variant. Each variant breaks exactly one constraint (Postgres checks
+	 * them in name order and reports the first failure).
+	 */
+	private int insertQuote(String submissionId, String variant) {
+		long classRate = jdbc.queryForObject(
+				"SELECT id FROM class_rates WHERE naics_code = '722511' AND effective_from = '2026-01-01'", Long.class);
+		long limitFactor = jdbc.queryForObject("SELECT id FROM limit_factors WHERE per_occurrence_limit = 1000000 "
+				+ "AND effective_from = '2026-01-01'", Long.class);
+		long ratingState = jdbc.queryForObject(
+				"SELECT id FROM rating_states WHERE state_code = 'TX' AND effective_from = '2026-01-01'", Long.class);
+		OffsetDateTime createdAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+		String status = "QUOTED";
+		BigDecimal premium = new BigDecimal("2520.00");
+		String currency = "USD";
+		BigDecimal minimum = new BigDecimal("500.00");
+		Boolean minimumApplied = false;
+		Long classRateId = classRate;
+		OffsetDateTime expiresAt = createdAt.plusDays(30);
+		switch (variant) {
+			case "valid baseline" -> {
+			}
+			case "QUOTED without a premium" -> {
+				premium = null;
+				currency = null;
+			}
+			case "REFERRED with a premium" -> status = "REFERRED";
+			case "QUOTED without a class rate row" -> classRateId = null;
+			case "EXPIRED stored" -> {
+				status = "EXPIRED";
+				premium = null;
+				currency = null;
+				minimum = null;
+				minimumApplied = null;
+				expiresAt = null;
+			}
+			case "expiry equal to creation" -> expiresAt = createdAt;
+			default -> throw new IllegalArgumentException(variant);
+		}
+		return jdbc.update("INSERT INTO quotes (id, submission_id, status, rated_as_of, rated_naics_code, "
+				+ "rated_state_code, rated_per_occurrence_limit, rated_aggregate_limit, rated_annual_revenue, "
+				+ "class_rate_id, limit_factor_id, rating_state_id, premium_amount, premium_currency, minimum_premium, "
+				+ "minimum_premium_applied, rating_plan_version, created_at, expires_at) "
+				+ "VALUES (?, ?, ?, ?, '722511', 'TX', 1000000, 2000000, 1200000, ?, ?, ?, ?, ?, ?, ?, 'GL-DEMO-1', ?, ?)",
+				"qte_CK_" + UUID.randomUUID(), submissionId, status, today().plusDays(7), classRateId, limitFactor,
+				ratingState, premium, currency, minimum, minimumApplied, createdAt, expiresAt);
 	}
 
 	// Stored evidence

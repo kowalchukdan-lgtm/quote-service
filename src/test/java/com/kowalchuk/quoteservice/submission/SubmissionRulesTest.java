@@ -33,6 +33,8 @@ class SubmissionRulesTest {
 
 	private static final NaicsClass DRILLING = new NaicsClass("213111", "Drilling Oil and Gas Wells", false);
 
+	private static final Address TEXAS = new Address("1200 Congress Ave", null, "Austin", "TX", "78701", "US");
+
 	private final NaicsClassRepository naicsClasses = mock(NaicsClassRepository.class);
 
 	private final LimitFactorRepository limitFactors = mock(LimitFactorRepository.class);
@@ -48,7 +50,7 @@ class SubmissionRulesTest {
 		when(naicsClasses.findById("213111")).thenReturn(Optional.of(DRILLING));
 		when(naicsClasses.findById("999999")).thenReturn(Optional.empty());
 		// The rows in effect on the policy date; the date filtering itself is covered by
-		// RateLookupRepositoryTest and the API tests against Postgres.
+		// RateLookupRepositoryIT and the API tests against Postgres.
 		offeredInEffect(limitFactor("1000000.00", "2000000.00"), limitFactor("2000000.00", "4000000.00"));
 	}
 
@@ -118,6 +120,56 @@ class SubmissionRulesTest {
 			.endsWith("Offered combinations: 1,000,000 / 2,000,000.");
 	}
 
+	@ParameterizedTest(name = "{0}")
+	@CsvSource({ "/annualRevenue/currency", "/requestedLimit/perOccurrence/currency",
+			"/requestedLimit/aggregate/currency" })
+	void currencyMustBeUsd(String pointer) {
+		Money revenue = pointer.startsWith("/annualRevenue") ? eur("1200000.00") : usd("1200000.00");
+		Money perOccurrence = pointer.contains("perOccurrence") ? eur("1000000.00") : usd("1000000.00");
+		Money aggregate = pointer.contains("aggregate") ? eur("2000000.00") : usd("2000000.00");
+		NewSubmission submission = new NewSubmission("Lone Star Smokehouse LLC", TEXAS, "722511", revenue,
+				perOccurrence, aggregate, TODAY);
+
+		assertThat(violations(submission)).singleElement().satisfies(violation -> {
+			assertThat(violation.pointer()).isEqualTo(pointer);
+			assertThat(violation.detail()).isEqualTo("Currency EUR is not accepted; only USD is supported.");
+		});
+	}
+
+	@Test
+	void countryMustBeUs() {
+		NewSubmission submission = new NewSubmission("Lone Star Smokehouse LLC",
+				new Address("100 Queen St W", null, "Toronto", "ON", "78701", "CA"), "722511", usd("1200000.00"),
+				usd("1000000.00"), usd("2000000.00"), TODAY);
+
+		assertThat(violations(submission)).singleElement().satisfies(violation -> {
+			assertThat(violation.pointer()).isEqualTo("/address/country");
+			assertThat(violation.detail()).isEqualTo("Country CA is not accepted; only US addresses are supported.");
+		});
+	}
+
+	@ParameterizedTest(name = "revenue {0}")
+	@CsvSource({ "0", "0.00" })
+	void annualRevenueMustBeGreaterThanZero(String amount) {
+		NewSubmission submission = new NewSubmission("Lone Star Smokehouse LLC", TEXAS, "722511", usd(amount),
+				usd("1000000.00"), usd("2000000.00"), TODAY);
+
+		assertThat(violations(submission)).singleElement().satisfies(violation -> {
+			assertThat(violation.pointer()).isEqualTo("/annualRevenue/amount");
+			assertThat(violation.detail()).isEqualTo("Annual revenue must be greater than zero.");
+		});
+	}
+
+	@Test
+	void unknownNaicsIsRejected() {
+		assertThat(violations(submission(TODAY, "999999", usd("1000000.00"), usd("2000000.00"))))
+			.singleElement()
+			.satisfies(violation -> {
+				assertThat(violation.pointer()).isEqualTo("/classOfBusiness/naicsCode");
+				assertThat(violation.detail()).isEqualTo("NAICS 999999 is not a class we write.");
+			});
+	}
+
 	@Test
 	void classOutsideAppetiteIsRejectedWithItsTitle() {
 		assertThat(violations(submission(TODAY, "213111", usd("1000000.00"), usd("2000000.00"))))
@@ -135,10 +187,20 @@ class SubmissionRulesTest {
 				new Money(BigDecimal.ZERO, "EUR"), new Money(new BigDecimal("1000000.00"), "CAD"),
 				new Money(new BigDecimal("2000000.00"), "USD"), TODAY.minusDays(1));
 
-		assertThat(violations(submission)).extracting(FieldViolation::pointer)
+		List<FieldViolation> violations = violations(submission);
+
+		// One violation per broken rule, each with a message specific to that rule.
+		assertThat(violations).extracting(FieldViolation::pointer)
+			.doesNotHaveDuplicates()
 			.containsExactlyInAnyOrder("/effectiveDate", "/annualRevenue/currency",
 					"/requestedLimit/perOccurrence/currency", "/address/country", "/annualRevenue/amount",
 					"/classOfBusiness/naicsCode");
+		assertThat(violations).extracting(FieldViolation::detail)
+			.containsExactlyInAnyOrder("Effective date 2026-10-22 is in the past.",
+					"Currency EUR is not accepted; only USD is supported.",
+					"Currency CAD is not accepted; only USD is supported.",
+					"Country CA is not accepted; only US addresses are supported.",
+					"Annual revenue must be greater than zero.", "NAICS 999999 is not a class we write.");
 	}
 
 	@SuppressWarnings("unchecked")
@@ -173,6 +235,10 @@ class SubmissionRulesTest {
 
 	private static Money usd(String amount) {
 		return new Money(new BigDecimal(amount), "USD");
+	}
+
+	private static Money eur(String amount) {
+		return new Money(new BigDecimal(amount), "EUR");
 	}
 
 }

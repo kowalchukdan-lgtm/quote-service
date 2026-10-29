@@ -11,6 +11,63 @@ source of truth, and the controllers implement interfaces generated from it.
 - `./mvnw verify` runs unit tests and the `*IT` integration tests. The database tests use
   Testcontainers, so Docker must be running.
 
+## Tests and coverage
+
+### Conventions
+
+All tests live in `src/test/java`; there are no per-layer source folders. The layer is set by
+the class name, and the build enforces it: Surefire runs `*Test` during `test`, and Failsafe runs
+`*IT` during `integration-test`/`verify` (configured by the Spring Boot parent).
+
+| Layer | Convention | What it's for | Runner | Docker |
+|---|---|---|---|---|
+| Unit | `*Test`; JUnit 5, AssertJ, Mockito; no Spring context | Business logic and edge cases, exhaustively and fast (`RatingEngineTest`, `SubmissionRulesTest`) | Surefire | No |
+| Slice | `*Test` + `@Tag("slice")` + `@WebMvcTest` | The web layer with services mocked: status codes, headers, Problem Details, validation (`ApiWebLayerTest`) | Surefire | No |
+| Integration | `*IT`; full context + `TestcontainersConfiguration` | Real wiring against a throwaway Postgres: SQL, migrations, transactions, end to end (`QuoteApiIT`) | Failsafe | Yes |
+
+Slice and integration tests also check every response against `quote-api.yaml`
+(`OpenApiContract`). `RatingArchitectureTest` (ArchUnit) fails the build if the `rating`
+package, or its tests, depend on Spring, JPA, the database, or the JPA-backed application
+packages, so the pricing engine stays plain Java.
+
+Integration tests never touch your local database: Testcontainers starts a fresh
+`postgres:17-alpine` container on a random port and points the tests at it.
+
+### Which command runs which tests
+
+| Command | Runs | Docker | Coverage |
+|---|---|---|---|
+| `./mvnw test` | Unit + slice (Surefire) | No | Unit report, no gate |
+| `./mvnw test -DexcludedGroups=slice` | Unit only | No | — |
+| `./mvnw test -Dgroups=slice` | Slice only | No | — |
+| `./mvnw test -Dtest=RatingEngineTest` | One test class | No | — |
+| `./mvnw verify` | Everything: Surefire, then Failsafe | Yes | Both reports and both gates |
+| `./mvnw verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=QuoteApiIT` | One integration test class | Yes | Partial: the gates aren't meaningful |
+
+### Coverage reports and gates
+
+JaCoCo writes two reports:
+
+- `target/site/jacoco-unit/index.html`: Surefire tests only (unit + slice).
+- `target/site/jacoco-combined/index.html`: Surefire and Failsafe data merged.
+
+`./mvnw verify` fails the build if either rule isn't met:
+
+- **Rating package ≥ 90% line coverage from unit tests alone**, so the pricing logic is proven by
+  fast, focused tests.
+- **Overall ≥ 80% line coverage on the combined data.**
+
+The OpenAPI-generated code (`com.kowalchuk.quoteservice.api`) is excluded; everything hand-written
+counts. Reports are written before the checks, so a failed build still leaves both to inspect.
+
+The gates run only when the build reaches `verify` (`verify`, `install`, `deploy`), not on `test`
+or `package`. They are bypassed by `-DskipTests` (no coverage data, so the checks are skipped),
+`-Djacoco.skip=true`, and `-DskipITs` (the combined report then has only unit data). CI should run
+`./mvnw verify` with none of these.
+
+The JaCoCo agent is attached through the `argLine` property. To add JVM options for tests, write
+`<argLine>@{argLine} …</argLine>`; replacing `argLine` silently drops coverage to zero.
+
 ## Rating (fictional)
 
 > **The rating formula, rates, factors and rules here are illustrative only. They are not

@@ -1,0 +1,59 @@
+fieldset {
+  max-width: 40rem;
+  margin: 0 0 1rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+legend {
+  font-weight: 600;
+}
+
+.field {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-left: 4px solid transparent;
+
+  &.missing {
+    border-left-color: #b00020;
+    background: #fdecee;
+  }
+
+  &.review {
+    border-left-color: #c58a00;
+    background: #fff7e6;
+  }
+}
+
+label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+input,
+select {
+  width: 100%;
+  max-width: 24rem;
+  box-sizing: border-box;
+  padding: 0.35rem;
+}
+
+[aria-invalid='true'] {
+  border: 2px solid #b00020;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 3px solid #1a56db;
+  outline-offset: 2px;
+}
+
+.form-error {
+  color: #b00020;
+}
+
+.actions p {
+  min-height: 1.5em;
+}

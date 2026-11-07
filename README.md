@@ -171,7 +171,8 @@ Prerequisites: Java 21 and Docker. Maven comes with the wrapper (`./mvnw`).
 ### Front end (scaffold)
 
 An Angular app in `frontend/` for the extraction review workflow: an upload page that drafts a
-submission from a PDF, then a placeholder extraction page (the review form comes next).
+submission from a PDF, then a review form showing the draft with its flags and evidence. Confirming
+the form creates the submission; a confirmed extraction shows it read-only.
 Its API client is generated from `quote-api.yaml` (openapi-generator 7.26.0, as in Maven) before
 every start, build, test and lint, and is never committed. Needs Node 24 and Java 21 (for the
 generator); with the service running on port 8080:

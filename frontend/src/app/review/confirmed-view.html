@@ -1,0 +1,40 @@
+<section class="summary" data-testid="confirmed">
+  @if (submissionId(); as id) {
+    <p>
+      Confirmed as submission
+      <!-- TODO(next session): link to /submissions/:id once the quote page exists. -->
+      <span class="submission-id" data-testid="submission-id">{{ id }}</span>
+      @if (canCopy) {
+        <button type="button" (click)="copy(id)">Copy ID</button>
+      }
+      @if (extraction().confirmedAt; as at) {
+        on {{ at | date: 'medium' }}
+      }
+    </p>
+    <p role="status">
+      @if (copied()) {
+        Copied.
+      }
+    </p>
+  } @else {
+    <p>This extraction is confirmed, but no submission ID was recorded.</p>
+  }
+</section>
+
+<app-review-notices [info]="info()" />
+
+@if (loading()) {
+  <p>Loading the submission…</p>
+} @else if (loadError(); as message) {
+  <p class="error" role="alert">{{ message }}</p>
+} @else if (current(); as s) {
+  <dl>
+    @for (field of fields; track field.key) {
+      <dt>{{ field.label }}</dt>
+      <dd>
+        <span [id]="'value-' + field.key" [attr.aria-describedby]="describedBy(field)">{{ value(field, s) }}</span>
+        <app-field-notes [id]="'value-' + field.key" [notes]="notes(field)" />
+      </dd>
+    }
+  </dl>
+}

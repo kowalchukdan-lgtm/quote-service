@@ -1,8 +1,8 @@
 import { Routes } from '@angular/router';
-import { ExtractionPlaceholder } from './extraction-placeholder/extraction-placeholder';
+import { Review } from './review/review';
 import { Upload } from './upload/upload';
 
 export const routes: Routes = [
   { path: '', component: Upload },
-  { path: 'extractions/:extractionId', component: ExtractionPlaceholder },
+  { path: 'extractions/:extractionId', component: Review },
 ];

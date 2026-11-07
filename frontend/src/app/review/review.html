@@ -1,0 +1,35 @@
+@if (extraction.hasValue()) {
+  @let e = extraction.value();
+  <h1>Review extraction</h1>
+  <p class="document">From <strong>{{ e.document.fileName }}</strong>, drafted by {{ e.model }}.</p>
+
+  @if (notice(); as message) {
+    <p role="status" data-testid="notice">{{ message }}</p>
+  }
+
+  @if (justConfirmed(); as submission) {
+    <app-confirmed-view [extraction]="e" [submission]="submission" />
+  } @else if (e.status === 'CONFIRMED') {
+    <app-confirmed-view [extraction]="e" />
+  } @else if (e.status === 'DRAFT') {
+    <app-review-form
+      [extraction]="e"
+      (confirmed)="justConfirmed.set($event)"
+      (alreadyConfirmed)="onAlreadyConfirmed()"
+    />
+  } @else {
+    <p>This extraction has status {{ e.status }}, which this page can't review yet.</p>
+  }
+} @else if (extraction.isLoading()) {
+  <h1>Review extraction</h1>
+  <p>Loading…</p>
+} @else if (extraction.error()) {
+  <h1>Review extraction</h1>
+  <p class="error" role="alert">
+    @if (problem(); as p) {
+      {{ p.status }} {{ p.title }}
+    } @else {
+      The extraction could not be loaded.
+    }
+  </p>
+}

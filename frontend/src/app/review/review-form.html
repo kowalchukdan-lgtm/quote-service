@@ -1,0 +1,87 @@
+<app-review-notices [info]="info()" />
+
+<form [attr.aria-busy]="confirming()" (submit)="confirm($event)" novalidate>
+  @for (group of groups; track group.legend) {
+    <fieldset>
+      <legend>{{ group.legend }}</legend>
+
+      @for (field of group.fields; track field.key) {
+        @let id = inputId(field);
+        @let error = errorMessage(field);
+        @let state = flagState(field);
+        <div
+          class="field"
+          [class.missing]="state === 'missing'"
+          [class.review]="state === 'review'"
+          [attr.data-field]="field.key"
+        >
+          <label [for]="id">{{ field.label }}</label>
+
+          @switch (field.kind) {
+            @case ('limit') {
+              <select
+                [id]="id"
+                [formControl]="control(field)"
+                [attr.aria-describedby]="describedBy(field)"
+                [attr.aria-invalid]="error ? 'true' : null"
+              >
+                <option value="">Choose limits</option>
+                @for (option of limitOptions; track option.value) {
+                  <option [value]="option.value">{{ option.label }}</option>
+                }
+              </select>
+            }
+            @case ('date') {
+              <input
+                type="date"
+                [id]="id"
+                [formControl]="control(field)"
+                [attr.aria-describedby]="describedBy(field)"
+                [attr.aria-invalid]="error ? 'true' : null"
+              />
+            }
+            @default {
+              <input
+                type="text"
+                [id]="id"
+                [formControl]="control(field)"
+                [attr.inputmode]="field.key === 'annualRevenue' ? 'decimal' : null"
+                [attr.aria-describedby]="describedBy(field)"
+                [attr.aria-invalid]="error ? 'true' : null"
+              />
+            }
+          }
+
+          <app-field-notes [id]="id" [notes]="notes(field)" />
+        </div>
+      }
+    </fieldset>
+  }
+
+  @if (formError(); as e) {
+    <div class="form-error" role="alert">
+      <p><strong>{{ e.title }}</strong></p>
+      @if (e.detail) {
+        <p>{{ e.detail }}</p>
+      }
+      @if (e.unplaced.length) {
+        <ul>
+          @for (fieldError of e.unplaced; track $index) {
+            <li><code>{{ fieldError.pointer }}</code>: {{ fieldError.detail }}</li>
+          }
+        </ul>
+      }
+    </div>
+  }
+
+  <div class="actions">
+    <button type="submit" [disabled]="form.invalid || confirming()">Confirm submission</button>
+    <p role="status">
+      @if (confirming()) {
+        Confirming…
+      } @else if (form.invalid) {
+        Complete the highlighted fields to confirm.
+      }
+    </p>
+  </div>
+</form>

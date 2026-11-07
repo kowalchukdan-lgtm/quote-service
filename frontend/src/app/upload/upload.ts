@@ -2,7 +2,8 @@ import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { ExtractionsService, Problem } from '../api';
+import { ExtractionsService } from '../api';
+import { problemOf } from '../problem';
 
 // Matches spring.servlet.multipart.max-file-size=10MB, which Spring reads as 10 MiB.
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
@@ -40,16 +41,12 @@ const FALLBACK: Record<number, Omit<UploadError, 'retryable'>> = {
   503: { title: 'Extraction not available', detail: 'Document extraction is not enabled right now.' },
 };
 
-function isProblem(body: unknown): body is Problem {
-  return typeof body === 'object' && body !== null && typeof (body as Problem).title === 'string';
-}
-
 function toUploadError(error: unknown): UploadError {
   const status = error instanceof HttpErrorResponse ? error.status : 0;
-  const body: unknown = error instanceof HttpErrorResponse ? error.error : undefined;
+  const problem = problemOf(error);
   const retryable = status === 502;
-  if (isProblem(body)) {
-    return { title: body.title, detail: body.detail, retryable };
+  if (problem) {
+    return { title: problem.title, detail: problem.detail, retryable };
   }
   const fallback = FALLBACK[status] ?? {
     title: 'Upload failed',

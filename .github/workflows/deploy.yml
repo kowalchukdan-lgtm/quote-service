@@ -32,6 +32,21 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # The front end's API client generator runs on the Java set up above.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Front end lint, tests and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+
       - name: Run tests, coverage and architecture gates
         run: |
           chmod +x mvnw
@@ -69,8 +84,14 @@ jobs:
       - name: Smoke test
         run: |
           URL=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          healthy=false
           for i in $(seq 1 12); do
-            if curl -fsS "https://$URL/actuator/health"; then echo; echo "Healthy"; exit 0; fi
+            if curl -fsS "https://$URL/actuator/health"; then echo; echo "Healthy"; healthy=true; break; fi
             echo "Waiting for app ($i/12)..."; sleep 10
           done
-          echo "Health check failed"; exit 1
+          if [ "$healthy" != true ]; then echo "Health check failed"; exit 1; fi
+          if curl -fsS "https://$URL/" | grep -q '<app-root'; then
+            echo "Front end served at /"
+          else
+            echo "Front end not served at /"; exit 1
+          fi

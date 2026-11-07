@@ -187,7 +187,20 @@ cd frontend && npm ci && npm start
 ```
 
 `ng serve` proxies `/v1` to `localhost:8080`. Open `http://localhost:4200/`. `npm run lint`,
-`npm test` and `npm run build` are the checks.
+`npm test` and `npm run build` are the checks; CI runs all three before the Maven build.
+
+**In production** there is no separate web server. The Docker build compiles the app in a
+`frontend` stage (Node 24 with Temurin's Java 21 copied in for the generator, on the build
+machine's platform) and copies it into the jar's static resources. So one origin serves the UI
+and `/v1`, with no CORS:
+
+- **Deep links:** `SpaForwardController` forwards `/extractions/<id>` and `/submissions/<id>` to
+  `index.html`, so a reload works. When you add an Angular route, add its path there too. Any
+  other unknown path, including under `/v1` and `/actuator`, still gets the 404 Problem Details.
+- **Caching:** `index.html` is served `no-store`, so a deploy shows up on the next load. The
+  hashed JS and CSS bundles are cached for a year as `immutable` (`StaticResourceConfig`).
+- **Local runs:** `./mvnw spring-boot:run` serves only the API; the UI is packaged by the Docker
+  build alone.
 
 ## Testing
 

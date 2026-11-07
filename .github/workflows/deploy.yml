@@ -90,8 +90,10 @@ jobs:
             echo "Waiting for app ($i/12)..."; sleep 10
           done
           if [ "$healthy" != true ]; then echo "Health check failed"; exit 1; fi
-          if curl -fsS "https://$URL/" | grep -q '<app-root'; then
-            echo "Front end served at /"
-          else
-            echo "Front end not served at /"; exit 1
-          fi
+          # Built-in authentication (Entra ID) gates everything except health: a non-browser
+          # client gets 401, for the page and the API alike. Browsers are redirected to sign in.
+          for path in / /v1/extractions/ext_SMOKETEST; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "https://$URL$path")
+            if [ "$code" != 401 ]; then echo "Expected 401 without sign-in for $path, got $code"; exit 1; fi
+            echo "$path requires sign-in (401)"
+          done

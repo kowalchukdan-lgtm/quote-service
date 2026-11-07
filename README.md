@@ -125,8 +125,9 @@ Full contract: [`src/main/resources/openapi/quote-api.yaml`](src/main/resources/
   kept for the record. Show `expiresAt` in the viewer's local time, including the time of day.
 - Quote responses carry `Cache-Control: no-store`: rely on `status` and `expiresAt` from a fresh
   response, never a cached copy.
-- The contract declares bearer authentication, rate limiting and idempotency keys; these aren't
-  implemented yet (see [Deferred](#deferred)).
+- The contract declares bearer authentication, rate limiting and idempotency keys; the API
+  doesn't implement these yet (see [Deferred](#deferred)). The deployed app sits behind Entra ID
+  sign-in (see [Authentication](#authentication)).
 
 ## Running locally
 
@@ -201,6 +202,19 @@ and `/v1`, with no CORS:
   hashed JS and CSS bundles are cached for a year as `immutable` (`StaticResourceConfig`).
 - **Local runs:** `./mvnw spring-boot:run` serves only the API; the UI is packaged by the Docker
   build alone.
+
+### Authentication
+
+Azure Container Apps' built-in authentication, with Microsoft Entra ID (single tenant), sits in
+front of the whole deployed app, UI and `/v1` alike. It's configured in Azure rather than in code,
+so the app itself never sees tokens:
+
+- **Who gets what:** browsers without a session are sent to Entra sign-in; other clients get `401`.
+- **Excluded paths:** `/actuator/health` and its `liveness` and `readiness` paths stay open for the
+  health probes and the deploy smoke test. The smoke test also checks that `/` and a `/v1` path
+  return `401`.
+- **curl:** calls against the Azure URL now need a signed-in browser session.
+- **Local runs** (`./mvnw spring-boot:run`, `ng serve`, Docker) are unaffected.
 
 ## Testing
 
@@ -297,8 +311,9 @@ Known gaps and decisions left open, recorded rather than hidden:
 
 - **Idempotency enforcement.** The `Idempotency-Key` header is validated but not honoured; a
   retry creates a duplicate (TODOs in both controllers, and a test records today's behaviour).
-- **Authentication and broker scoping.** The contract declares bearer tokens, and that a broker
-  gets `404` for another broker's resources; neither is implemented.
+- **Authentication and broker scoping.** Sign-in now gates the deployed app (see
+  [Authentication](#authentication)), but the contract's bearer tokens aren't checked by the API,
+  and a broker getting `404` for another broker's resources isn't implemented.
 - **Rate limiting (`429`) and `503` handling**, declared in the contract.
 - **Tracing.** `TraceIdFilter` is a stand-in until Micrometer Tracing.
 - **Blank business names.** A name made only of non-breaking spaces is accepted (Java's `\s` is

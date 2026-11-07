@@ -1,0 +1,46 @@
+{
+  "document": "sample-03-sharp-and-co-barbers.pdf",
+  "scenario": "Abbreviated values ('$180K', '1M / 2M', '12/15/26', 'USA', ZIP+4). Premium hits the state minimum.",
+  "expected": {
+    "businessName": "Sharp & Co. Barbers",
+    "address": {
+      "line1": "3918 30th St",
+      "city": "San Diego",
+      "region": "CA",
+      "postalCode": "92104-3010",
+      "country": "US"
+    },
+    "classOfBusiness": {
+      "naicsCode": "812111"
+    },
+    "annualRevenue": {
+      "amount": "180000.00",
+      "currency": "USD"
+    },
+    "requestedLimit": {
+      "perOccurrence": {
+        "amount": "1000000.00",
+        "currency": "USD"
+      },
+      "aggregate": {
+        "amount": "2000000.00",
+        "currency": "USD"
+      }
+    },
+    "effectiveDate": "2026-12-15"
+  },
+  "expectedFlags": [],
+  "checks": [
+    "Use the legal name, not the DBA.",
+    "'USA' normalizes to country 'US'.",
+    "Two-digit year 26 means 2026."
+  ],
+  "expectedQuoteOutcome": {
+    "status": "QUOTED",
+    "premium": {
+      "amount": "650.00",
+      "currency": "USD"
+    },
+    "calculation": "180,000 / 1,000 x 1.4000 x 1.0000 = 252.00, raised to CA minimum 650.00"
+  }
+}

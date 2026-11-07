@@ -1,0 +1,45 @@
+{
+  "document": "sample-01-keystone-pipe-heating.pdf",
+  "scenario": "Clean form, every field present. Baseline happy path.",
+  "expected": {
+    "businessName": "Keystone Pipe & Heating LLC",
+    "address": {
+      "line1": "2215 Tilghman Street",
+      "line2": "Suite 4",
+      "city": "Allentown",
+      "region": "PA",
+      "postalCode": "18104",
+      "country": "US"
+    },
+    "classOfBusiness": {
+      "naicsCode": "238220"
+    },
+    "annualRevenue": {
+      "amount": "1850000.00",
+      "currency": "USD"
+    },
+    "requestedLimit": {
+      "perOccurrence": {
+        "amount": "1000000.00",
+        "currency": "USD"
+      },
+      "aggregate": {
+        "amount": "2000000.00",
+        "currency": "USD"
+      }
+    },
+    "effectiveDate": "2026-12-01"
+  },
+  "expectedFlags": [],
+  "checks": [
+    "Suite number goes in address.line2, not line1."
+  ],
+  "expectedQuoteOutcome": {
+    "status": "QUOTED",
+    "premium": {
+      "amount": "8325.00",
+      "currency": "USD"
+    },
+    "calculation": "1,850,000 / 1,000 x 4.5000 x 1.0000 = 8,325.00 (PA minimum 500.00)"
+  }
+}

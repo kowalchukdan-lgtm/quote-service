@@ -1,0 +1,44 @@
+{
+  "document": "sample-04-coastal-taco-stand.pdf",
+  "scenario": "Required field missing. The extractor must flag it, not invent a number.",
+  "expected": {
+    "businessName": "Coastal Taco Stand LLC",
+    "address": {
+      "line1": "1402 E 7th Ave",
+      "city": "Tampa",
+      "region": "FL",
+      "postalCode": "33605",
+      "country": "US"
+    },
+    "classOfBusiness": {
+      "naicsCode": "722513"
+    },
+    "annualRevenue": null,
+    "requestedLimit": {
+      "perOccurrence": {
+        "amount": "1000000.00",
+        "currency": "USD"
+      },
+      "aggregate": {
+        "amount": "2000000.00",
+        "currency": "USD"
+      }
+    },
+    "effectiveDate": "2026-12-15"
+  },
+  "expectedFlags": [
+    {
+      "field": "annualRevenue",
+      "reason": "MISSING",
+      "note": "Document says financials to follow."
+    }
+  ],
+  "checks": [
+    "annualRevenue must be null (not 0, not an estimate).",
+    "The draft cannot be confirmed until a reviewer supplies revenue."
+  ],
+  "expectedQuoteOutcome": {
+    "status": "NOT_SUBMITTED",
+    "note": "Confirm is blocked until revenue is provided."
+  }
+}

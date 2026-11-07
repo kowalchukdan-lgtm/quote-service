@@ -1,0 +1,40 @@
+{
+  "document": "sample-05-permian-basin-drilling.pdf",
+  "scenario": "Extraction is straightforward, but the class is outside appetite. Shows extraction and underwriting rules are separate: the AI drafts, the existing rules decide.",
+  "expected": {
+    "businessName": "Permian Basin Drilling Services, Inc.",
+    "address": {
+      "line1": "6001 W Industrial Ave",
+      "city": "Midland",
+      "region": "TX",
+      "postalCode": "79703",
+      "country": "US"
+    },
+    "classOfBusiness": {
+      "naicsCode": "213111"
+    },
+    "annualRevenue": {
+      "amount": "7400000.00",
+      "currency": "USD"
+    },
+    "requestedLimit": {
+      "perOccurrence": {
+        "amount": "1000000.00",
+        "currency": "USD"
+      },
+      "aggregate": {
+        "amount": "2000000.00",
+        "currency": "USD"
+      }
+    },
+    "effectiveDate": "2026-12-01"
+  },
+  "expectedFlags": [],
+  "checks": [
+    "Extraction should still succeed; appetite is not the extractor's decision."
+  ],
+  "expectedQuoteOutcome": {
+    "status": "REJECTED_ON_CONFIRM",
+    "note": "Confirming creates a submission request that fails with 422: NAICS 213111 is not a class we write."
+  }
+}

@@ -218,7 +218,9 @@ so the app itself never sees tokens:
 
 ## Testing
 
-All tests live in `src/test/java`; the class name sets the layer, and the build enforces it:
+The backend's tests live in `src/test/java` (the front end's Vitest specs sit beside its
+components, and the browser tests are under [End-to-end tests](#end-to-end-tests)). The class name
+sets the layer, and the build enforces it:
 Surefire runs `*Test` during `test`, and Failsafe runs `*IT` during `integration-test`/`verify`.
 
 | Layer | Convention | What it's for | Docker |
@@ -256,6 +258,42 @@ agent uses the `argLine` property: to add test JVM options, write `<argLine>@{ar
 **IDE note.** VS Code's Java extension (and Eclipse) build into `target-ide/`, via the `ide`
 profile in `pom.xml`, so they never collide with Maven's `target/`. After pulling this change,
 run "Java: Clean Java Language Server Workspace" once.
+
+### End-to-end tests
+
+Playwright (`frontend/e2e/`) drives the whole underwriter flow in Chromium against the real
+system: the Angular app, the Spring API and a fresh Postgres. Only the AI model is faked, by
+`GoldenSetModelClient`, which answers each golden-set document
+(`src/test/resources/extraction/golden/`) with its expected extraction and fails on any other.
+The tests cover:
+
+- sample-04: the missing revenue is flagged, filled in, confirmed and quoted at $1,170.00;
+- sample-02: the suspected-instruction banner is shown;
+- reloading a review page by its deep link.
+
+The fake lives in test code and is started by a test main class (`E2eQuoteServiceApplication`)
+with the `e2e` profile, so it isn't in the jar or the image and production can't switch it on.
+
+Needs Docker running, Java 21 and Node 24, plus Chromium once
+(`npx playwright install chromium`). Then:
+
+```bash
+cd frontend && npm run e2e          # add --ui or --headed to watch
+npx playwright show-report          # after a failure: traces and screenshots
+```
+
+Playwright starts the backend on port 8081 and `ng serve` on 4201, away from the usual 8080 and
+4200, whose backend has no fake model. To iterate faster, start the backend once and leave it
+running; outside CI, Playwright reuses whatever is already on those ports:
+
+```bash
+./mvnw spring-boot:test-run -Dspring-boot.run.main-class=com.kowalchuk.quoteservice.e2e.E2eQuoteServiceApplication \
+  -Dspring-boot.run.profiles=e2e -Dspring-boot.run.arguments=--server.port=8081
+```
+
+The golden documents' effective dates stop being confirmable in December 2026, so the quote test
+moves the date to 30 days ahead, as a reviewer would. CI runs these tests in their own job
+alongside the Maven build, and uploads the report and traces when a test fails.
 
 ## Roadmap
 

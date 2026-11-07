@@ -131,6 +131,16 @@ class ExtractionResponseParserTest {
 	}
 
 	@Test
+	void dropsMissingFlagsOnOptionalFields() {
+		ExtractedSubmission draft = parser.parse(clean("""
+				, "flags": [{"field": "address.line2", "reason": "MISSING", "note": "No suite given."},
+				            {"field": "address.line2", "reason": "AMBIGUOUS", "note": "Unit or floor unclear."}]"""));
+
+		assertThat(draft.flags()).containsExactly(
+				new FieldFlag("address.line2", FlagReason.AMBIGUOUS, "Unit or floor unclear."));
+	}
+
+	@Test
 	void treatsAMissingAddressObjectAsEmpty() {
 		ExtractedSubmission draft = parser.parse("""
 				{"businessName": "Acme", "naicsCode": "722511"}""");

@@ -113,7 +113,7 @@ public final class GoldenSetScorer {
 
 	/** Builds the model JSON that would produce exactly the golden answer; for tests of the pipeline. */
 	@SuppressWarnings("unchecked")
-	static String perfectModelAnswer(GoldenSet.Case golden) {
+	public static String perfectModelAnswer(GoldenSet.Case golden) {
 		Map<String, Object> address = (Map<String, Object>) golden.value("address");
 		StringBuilder flags = new StringBuilder();
 		for (Map<String, Object> flag : golden.expectedFlags()) {

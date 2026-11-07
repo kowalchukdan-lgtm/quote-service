@@ -43,6 +43,8 @@ public class ExtractionResponseParser {
 	private static final Set<String> US_ALIASES = Set.of("USA", "U.S.", "U.S.A.", "UNITED STATES",
 			"UNITED STATES OF AMERICA");
 
+	private static final Set<String> OPTIONAL_FIELDS = Set.of("address.line2");
+
 	private static final int MAX_NAME = 200;
 
 	private static final int MAX_ADDRESS_PART = 100;
@@ -62,7 +64,10 @@ public class ExtractionResponseParser {
 			throw new ExtractionFailedException("The model returned an empty answer.");
 		}
 
-		List<FieldFlag> flags = new ArrayList<>(modelFlags(raw.flags()));
+		// line2 is optional, so "missing" isn't something a reviewer needs to act on.
+		List<FieldFlag> flags = new ArrayList<>(modelFlags(raw.flags()).stream()
+			.filter(flag -> !(flag.reason() == FlagReason.MISSING && OPTIONAL_FIELDS.contains(flag.field())))
+			.toList());
 		RawAddress rawAddress = raw.address() != null ? raw.address()
 				: new RawAddress(null, null, null, null, null, null);
 

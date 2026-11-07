@@ -34,8 +34,12 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+
+import com.kowalchuk.quoteservice.extraction.ExtractionFailedException;
+import com.kowalchuk.quoteservice.extraction.UnreadableDocumentException;
 
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -137,6 +141,38 @@ public class ProblemHandler extends ResponseEntityExceptionHandler {
 				"The submission is well-formed but cannot be accepted.");
 		problem.setProperty("errors", sorted(ex.getViolations()));
 		return respond(ex, problem, new HttpHeaders(), request);
+	}
+
+	@Override
+	protected @Nullable ResponseEntity<Object> handleMaxUploadSizeExceededException(
+			MaxUploadSizeExceededException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+		return respond(ex, problem(ProblemType.DOCUMENT_TOO_LARGE, "Documents can be at most 10 MB."), headers,
+				request);
+	}
+
+	@ExceptionHandler(ProblemException.class)
+	public @Nullable ResponseEntity<Object> handleProblem(ProblemException ex, WebRequest request) {
+		return respond(ex, problem(ex.getType(), ex.getMessage()), new HttpHeaders(), request);
+	}
+
+	/** Our own message (not a PDF, no text layer, too many pages), so it is safe to show. */
+	@ExceptionHandler(UnreadableDocumentException.class)
+	public @Nullable ResponseEntity<Object> handleUnreadableDocument(UnreadableDocumentException ex,
+			WebRequest request) {
+		return respond(ex, problem(ProblemType.UNREADABLE_DOCUMENT, ex.getMessage()), new HttpHeaders(), request);
+	}
+
+	/**
+	 * The model call failed. Logged with the cause for support; the client gets a fixed message,
+	 * because the cause can include provider details.
+	 */
+	@ExceptionHandler(ExtractionFailedException.class)
+	public @Nullable ResponseEntity<Object> handleExtractionFailed(ExtractionFailedException ex,
+			WebRequest request) {
+		log.warn("Extraction failed (traceId={}): {}", traceId(request), ex.getMessage(), ex);
+		return respond(ex,
+				problem(ProblemType.EXTRACTION_FAILED, "The AI model couldn't draft this document. Try again shortly."),
+				new HttpHeaders(), request);
 	}
 
 	@ExceptionHandler(ResourceNotFoundException.class)

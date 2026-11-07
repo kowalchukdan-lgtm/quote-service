@@ -19,7 +19,13 @@ public enum ProblemType {
 	UNSUPPORTED_MEDIA_TYPE("unsupported-media-type", "Unsupported media type", HttpStatus.UNSUPPORTED_MEDIA_TYPE),
 	BUSINESS_RULE_VIOLATION("business-rule-violation", "Submission violates a business rule",
 			HttpStatus.UNPROCESSABLE_CONTENT),
+	// After BUSINESS_RULE_VIOLATION, so that stays the default type for a framework 422.
+	UNREADABLE_DOCUMENT("unreadable-document", "Document could not be read", HttpStatus.UNPROCESSABLE_CONTENT),
+	DOCUMENT_TOO_LARGE("document-too-large", "Document too large", HttpStatus.CONTENT_TOO_LARGE),
+	EXTRACTION_ALREADY_CONFIRMED("extraction-already-confirmed", "Extraction already confirmed",
+			HttpStatus.CONFLICT),
 	INTERNAL_ERROR("internal-error", "Internal server error", HttpStatus.INTERNAL_SERVER_ERROR),
+	EXTRACTION_FAILED("extraction-failed", "Extraction failed", HttpStatus.BAD_GATEWAY),
 	SERVICE_UNAVAILABLE("service-unavailable", "Service unavailable", HttpStatus.SERVICE_UNAVAILABLE);
 
 	private final String slug;

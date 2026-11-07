@@ -114,6 +114,9 @@ Full contract: [`src/main/resources/openapi/quote-api.yaml`](src/main/resources/
 | `GET /v1/submissions/{submissionId}` | Read a submission | `200`, `404` |
 | `POST /v1/submissions/{submissionId}/quotes` | Rate it and create a quote | `201` (`QUOTED`, `REFERRED` or `DECLINED`), `404`, `422` |
 | `GET /v1/quotes/{quoteId}` | Read a quote | `200`, `404` |
+| `POST /v1/extractions` | Upload a broker PDF; get an AI-drafted submission to review | `201`, `413`, `422`, `502`, `503` |
+| `GET /v1/extractions/{extractionId}` | Read a draft and its review state | `200`, `404` |
+| `POST /v1/extractions/{extractionId}/confirm` | Confirm the reviewed submission | `201` (a submission), `409`, `422` |
 
 - Errors are `application/problem+json` with a stable `type`, a `traceId`, and `errors[]`
   pointers for `400` and `422`.
@@ -210,17 +213,16 @@ run "Java: Clean Java Language Server Workspace" once.
 
 - **Done:** deployment to Azure Container Apps, with GitHub Actions (OIDC, no stored credentials),
   managed Postgres, Key Vault, health probes and Application Insights.
-- **In progress: AI-assisted extraction of submission data from broker documents** (see below).
+- **Done: AI-assisted extraction of submission data from broker documents** (see below).
 - An Angular front end for brokers.
 - Cosmos DB for raw submissions as received.
 
-### AI document extraction (in progress)
+### AI document extraction
 
 A broker PDF goes in; a *draft* submission comes out, with every field allowed to be empty, flags
 for the reviewer (missing, approximate, ambiguous, invalid, suspected instructions in the
 document) and a short source quote per field. The model only drafts: a person confirms the
-draft, and it then goes through the normal submission rules. Built so far (the engine, no
-endpoints yet):
+draft, and it then goes through the normal submission rules.
 
 - `extraction` package, plain Java like `rating`: `DocumentTextReader` (PDFBox; digital PDFs, with
   page and size limits), `ExtractionPrompt` (instructions; the document is wrapped as data),
@@ -237,6 +239,12 @@ endpoints yet):
   `GoldenSetLiveEvalTest` scores the real model, field by field, against a 90% pass mark plus two
   rules that must always hold: a missing value is never guessed, and text in a document never
   changes what is extracted.
+- `intake` package: the API. `POST /v1/extractions` drafts and stores the draft (not the
+  document: only its name, size and SHA-256 are kept). The model call runs outside any database
+  transaction. `POST /v1/extractions/{id}/confirm` takes the reviewer's final `SubmissionRequest`,
+  creates the submission through `SubmissionService` (same validation and rules) and marks the
+  draft confirmed in one transaction, under a row lock so a draft can't be confirmed twice. A
+  rule failure creates nothing and leaves the draft to be corrected.
 
 Extraction is switched on only when `QUOTE_EXTRACTION_ENDPOINT` is set, so local runs and the
 normal test suite need no Azure resources. To score the model (calls Azure; a few cents):
@@ -246,8 +254,8 @@ az login
 EXTRACTION_LIVE_EVAL=true ./mvnw test -Dtest=GoldenSetLiveEvalTest
 ```
 
-Next: the API (`POST /v1/extractions`, review, confirm), the golden-set evaluation in CI, and
-token and latency metrics in Application Insights.
+Next: the golden-set evaluation in CI, token and latency metrics in Application Insights, OCR for
+scanned documents, and Blob Storage if documents need to be kept.
 
 ## Deferred
 

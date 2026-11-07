@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/@openapitools/openapi-generator-cli/config.schema.json",
+  "spaces": 2,
+  "generator-cli": {
+    "version": "7.26.0",
+    "generators": {
+      "quote-api": {
+        "generatorName": "typescript-angular",
+        "inputSpec": "../src/main/resources/openapi/quote-api.yaml",
+        "output": "src/app/api",
+        "additionalProperties": {
+          "ngVersion": "22.0.0",
+          "providedIn": "root",
+          "fileNaming": "kebab-case",
+          "enumPropertyNaming": "original"
+        },
+        "globalProperty": {
+          "apiDocs": false,
+          "modelDocs": false
+        }
+      }
+    }
+  }
+}

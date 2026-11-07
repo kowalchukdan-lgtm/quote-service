@@ -168,6 +168,21 @@ Prerequisites: Java 21 and Docker. Maven comes with the wrapper (`./mvnw`).
    Expect a `QUOTED` quote at 2520.00 USD, the same quote with `Cache-Control: no-store`, and a
    `404` Problem Details response for the unknown submission.
 
+### Front end (scaffold)
+
+An Angular app in `frontend/` for the extraction review workflow; so far one placeholder page.
+Its API client is generated from `quote-api.yaml` (openapi-generator 7.26.0, as in Maven) before
+every start, build, test and lint, and is never committed. Needs Node 24 and Java 21 (for the
+generator); with the service running on port 8080:
+
+```bash
+cd frontend && npm ci && npm start
+```
+
+`ng serve` proxies `/v1` to `localhost:8080`. Open
+`http://localhost:4200/extractions/<extractionId>`. `npm run lint`, `npm test` and
+`npm run build` are the checks.
+
 ## Testing
 
 All tests live in `src/test/java`; the class name sets the layer, and the build enforces it:
@@ -297,5 +312,7 @@ Known gaps and decisions left open, recorded rather than hidden:
 
 ## Built with AI
 
-Developed with Claude Code, with every change reviewed by me in plan and manual modes. My first
-test (`RatingEngineTest.quotesStandardRiskAtExpectedPremium_handWritten`) was written by hand.
+Developed with Claude Code (in VS Code, with every change reviewed in plan and manual modes) and
+Claude (design, plus the AI extraction phases, delivered as patches that I reviewed, built and
+tested before merging). My first test
+(`RatingEngineTest.quotesStandardRiskAtExpectedPremium_handWritten`) was written by hand.

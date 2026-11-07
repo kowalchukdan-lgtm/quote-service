@@ -1,0 +1,75 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # lets GitHub request an OIDC token for Azure
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  REGISTRY: acrquoteservicedk.azurecr.io
+  IMAGE: quote-service
+  RESOURCE_GROUP: rg-quote-service
+  APP_NAME: ca-quote-service
+
+jobs:
+  test:
+    name: Test and quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Run tests, coverage and architecture gates
+        run: |
+          chmod +x mvnw
+          ./mvnw -B verify
+
+  deploy:
+    name: Build, push and deploy
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Azure login (OIDC, no stored credentials)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: |
+          az acr login --name acrquoteservicedk
+          docker build -t "$REGISTRY/$IMAGE:${{ github.sha }}" .
+          docker push "$REGISTRY/$IMAGE:${{ github.sha }}"
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY/$IMAGE:${{ github.sha }}" \
+            --output none
+
+      - name: Smoke test
+        run: |
+          URL=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$URL/actuator/health"; then echo; echo "Healthy"; exit 0; fi
+            echo "Waiting for app ($i/12)..."; sleep 10
+          done
+          echo "Health check failed"; exit 1

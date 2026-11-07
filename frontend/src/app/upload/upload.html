@@ -1,0 +1,49 @@
+<h1>Draft a submission from a document</h1>
+
+<form [attr.aria-busy]="reading()" (submit)="submit($event)">
+  <div
+    class="drop-zone"
+    data-testid="drop-zone"
+    [class.dragging]="dragging()"
+    (dragover)="onDragOver($event)"
+    (dragleave)="dragging.set(false)"
+    (drop)="onDrop($event)"
+  >
+    <label for="document">Broker document (PDF, up to 10 MB)</label>
+    <input
+      id="document"
+      type="file"
+      accept="application/pdf,.pdf"
+      aria-describedby="document-hint"
+      [disabled]="reading()"
+      (change)="onPick($event)"
+    />
+    <p id="document-hint" class="hint">Choose a file, or drag one here.</p>
+
+    @if (file(); as f) {
+      <p data-testid="chosen">Selected: <strong>{{ f.name }}</strong> ({{ sizeInMb(f) }} MB)</p>
+    }
+  </div>
+
+  <button type="submit" [disabled]="!file() || reading()">Read document</button>
+
+  <p role="status" class="status">
+    @if (reading()) {
+      Reading the document… this takes 10 to 20 seconds.
+    }
+  </p>
+
+  @if (rejection(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  } @else if (error(); as e) {
+    <div class="error" role="alert">
+      <p><strong>{{ e.title }}</strong></p>
+      @if (e.detail) {
+        <p>{{ e.detail }}</p>
+      }
+    </div>
+    @if (e.retryable) {
+      <button type="button" data-testid="retry" (click)="submit()">Try again</button>
+    }
+  }
+</form>

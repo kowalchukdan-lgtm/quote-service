@@ -1,5 +1,5 @@
 # ---- Build stage ----
-FROM eclipse-temurin:21-jdk AS build
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
 # Download dependencies first so they're cached between builds

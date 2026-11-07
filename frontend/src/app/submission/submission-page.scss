@@ -1,0 +1,29 @@
+.meta {
+  color: #555;
+}
+
+.id {
+  font-family: monospace;
+}
+
+form p {
+  min-height: 1.5em;
+}
+
+button:focus-visible,
+h2:focus-visible {
+  outline: 3px solid #1a56db;
+  outline-offset: 2px;
+}
+
+.quote {
+  max-width: 40rem;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.error {
+  color: #b00020;
+}

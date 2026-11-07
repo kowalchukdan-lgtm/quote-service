@@ -1,5 +1,6 @@
 import { Component, computed, inject, input, linkedSignal } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 import { ExtractionsService, Problem, Submission } from '../api';
 import { problemOf } from '../problem';
 import { ConfirmedView } from './confirmed-view';
@@ -8,7 +9,7 @@ import { ReviewForm } from './review-form';
 /** /extractions/:extractionId — review a draft, or see what was confirmed. */
 @Component({
   selector: 'app-review',
-  imports: [ConfirmedView, ReviewForm],
+  imports: [ConfirmedView, ReviewForm, RouterLink],
   templateUrl: './review.html',
   styles: `
     .error { color: #b00020; }

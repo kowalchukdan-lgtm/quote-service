@@ -8,6 +8,10 @@
   }
 
   @if (justConfirmed(); as submission) {
+    <p role="status" data-testid="created">
+      Submission created.
+      <a [routerLink]="['/submissions', submission.id]">Continue to the submission to get a quote</a>
+    </p>
     <app-confirmed-view [extraction]="e" [submission]="submission" />
   } @else if (e.status === 'CONFIRMED') {
     <app-confirmed-view [extraction]="e" />

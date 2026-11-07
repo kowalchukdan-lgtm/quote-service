@@ -1,0 +1,57 @@
+@if (submission.hasValue()) {
+  @let s = submission.value();
+  <h1>{{ s.businessName }}</h1>
+  <p class="meta">
+    Submission <span class="id" data-testid="submission-id">{{ s.id }}</span>, created
+    {{ s.createdAt | date: 'medium' }}
+  </p>
+
+  <app-submission-summary [submission]="s" />
+
+  <form [attr.aria-busy]="quoting()" (submit)="requestQuote($event)">
+    <button type="submit" [disabled]="quoting()">{{ quote() ? 'Get a new quote' : 'Get quote' }}</button>
+    <p role="status">
+      @if (quoting()) {
+        Requesting a quote…
+      }
+    </p>
+  </form>
+
+  @if (quoteError(); as e) {
+    <div class="error" role="alert">
+      <p><strong>{{ e.title }}</strong></p>
+      @if (e.detail) {
+        <p>{{ e.detail }}</p>
+      }
+      @if (e.errors.length) {
+        <ul>
+          @for (fieldError of e.errors; track $index) {
+            <li><code>{{ fieldError.pointer }}</code>: {{ fieldError.detail }}</li>
+          }
+        </ul>
+      }
+      @if (e.immutableNote) {
+        <p>A submission can't be changed. To change the risk, create a new submission.</p>
+      }
+    </div>
+  }
+
+  @if (quote(); as q) {
+    <section class="quote" aria-labelledby="quote-heading" data-testid="quote">
+      <h2 id="quote-heading" tabindex="-1" #resultHeading>Quote</h2>
+      <app-quote-result [quote]="q" />
+    </section>
+  }
+} @else if (submission.isLoading()) {
+  <h1>Submission</h1>
+  <p>Loading…</p>
+} @else if (submission.error()) {
+  <h1>Submission</h1>
+  <p class="error" role="alert">
+    @if (problem(); as p) {
+      {{ p.status }} {{ p.title }}
+    } @else {
+      The submission could not be loaded.
+    }
+  </p>
+}

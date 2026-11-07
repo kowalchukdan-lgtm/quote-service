@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideRouter } from '@angular/router';
 import { Extraction, Problem, Submission, SubmissionRequest, ValidationProblem, provideApi } from '../api';
 import { API_BASE_PATH } from '../app.config';
 import { Review } from './review';
@@ -59,7 +60,7 @@ describe('Review', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [Review],
-      providers: [provideHttpClient(), provideHttpClientTesting(), provideApi(API_BASE_PATH)],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideApi(API_BASE_PATH), provideRouter([])],
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -239,6 +240,10 @@ describe('Review', () => {
 
       expect(el.querySelector('form')).toBeNull();
       expect(el.querySelector('[data-testid="submission-id"]')?.textContent).toBe('sub_456');
+      const created = el.querySelector('[data-testid="created"]');
+      expect(created?.getAttribute('role')).toBe('status');
+      expect(created?.querySelector('a')?.textContent).toContain('Continue to the submission');
+      expect(created?.querySelector('a')?.getAttribute('href')).toBe('/submissions/sub_456');
       // The returned submission is shown without fetching it again (verify() checks).
     });
 
@@ -315,7 +320,13 @@ describe('Review', () => {
       expect(el.querySelector('form, input, select')).toBeNull();
       const confirmed = el.querySelector('[data-testid="confirmed"]')!;
       expect(el.querySelector('[data-testid="submission-id"]')?.textContent).toBe('sub_456');
-      expect(confirmed.querySelector('a')).toBeNull();
+      const idLink = confirmed.querySelector<HTMLAnchorElement>('a[data-testid="submission-id"]');
+      expect(idLink?.getAttribute('href')).toBe('/submissions/sub_456');
+      expect(
+        [...confirmed.querySelectorAll('a')].some(
+          (a) => a.textContent?.includes('Get a quote') && a.getAttribute('href') === '/submissions/sub_456',
+        ),
+      ).toBe(true);
 
       const text = el.textContent!;
       expect(text).toContain('$1,250,000.00');

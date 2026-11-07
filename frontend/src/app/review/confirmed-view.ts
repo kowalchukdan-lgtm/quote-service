@@ -1,22 +1,21 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { Extraction, Submission, SubmissionsService } from '../api';
 import { problemOf } from '../problem';
-import { FieldNotes, FieldNotesContent, describedBy } from './field-notes';
-import { FIELDS, FieldDef, corrections, display, reviewInfo } from './review-fields';
+import { SubmissionSummary } from '../submission/submission-summary';
+import { FieldNotesContent } from './field-notes';
+import { FieldDef, corrections, reviewInfo } from './review-fields';
 import { ReviewNotices } from './review-notices';
 
 /** A confirmed extraction, read-only: the submission that was approved, against the AI draft. */
 @Component({
   selector: 'app-confirmed-view',
-  imports: [DatePipe, FieldNotes, ReviewNotices],
+  imports: [DatePipe, RouterLink, ReviewNotices, SubmissionSummary],
   templateUrl: './confirmed-view.html',
   styles: `
-    .submission-id { font-family: monospace; user-select: all; }
-    dl { max-width: 40rem; }
-    dt { margin-top: 0.75rem; font-weight: 600; }
-    dd { margin-left: 0; }
+    .submission-id { font-family: monospace; }
     .error { color: #b00020; }
   `,
 })
@@ -27,7 +26,6 @@ export class ConfirmedView {
   /** The submission just created by confirming, which saves fetching it again. */
   readonly submission = input<Submission>();
 
-  protected readonly fields = FIELDS;
   protected readonly info = computed(() => reviewInfo(this.extraction()));
   protected readonly submissionId = computed(() => this.submission()?.id ?? this.extraction().submissionId);
 
@@ -62,19 +60,9 @@ export class ConfirmedView {
     );
   }
 
-  protected value(field: FieldDef, submission: Submission): string {
-    const shown = display(field, submission) ?? '—';
-    return field.key === 'naicsCode' ? `${shown} (${submission.classOfBusiness.description})` : shown;
-  }
-
-  protected notes(field: FieldDef): FieldNotesContent {
-    return {
-      review: this.info().byField.get(field.key),
-      correction: this.correctionNotes().get(field.key),
-    };
-  }
-
-  protected describedBy(field: FieldDef): string | null {
-    return describedBy(`value-${field.key}`, this.notes(field));
-  }
+  // An arrow function, so the summary can call it without losing `this`.
+  protected readonly notes = (field: FieldDef): FieldNotesContent => ({
+    review: this.info().byField.get(field.key),
+    correction: this.correctionNotes().get(field.key),
+  });
 }

@@ -168,11 +168,16 @@ Prerequisites: Java 21 and Docker. Maven comes with the wrapper (`./mvnw`).
    Expect a `QUOTED` quote at 2520.00 USD, the same quote with `Cache-Control: no-store`, and a
    `404` Problem Details response for the unknown submission.
 
-### Front end (scaffold)
+### Front end
 
-An Angular app in `frontend/` for the extraction review workflow: an upload page that drafts a
-submission from a PDF, then a review form showing the draft with its flags and evidence. Confirming
-the form creates the submission; a confirmed extraction shows it read-only.
+An Angular app in `frontend/` for the document-to-quote workflow:
+
+1. `/`: upload a broker PDF, which is drafted into an extraction.
+2. `/extractions/<id>`: review the draft with its flags and evidence, then confirm it as a
+   submission. A confirmed extraction shows the submission read-only.
+3. `/submissions/<id>`: the submission, and **Get quote**, which shows the premium, rating
+   factors and expiry, or the referral or decline reasons.
+
 Its API client is generated from `quote-api.yaml` (openapi-generator 7.26.0, as in Maven) before
 every start, build, test and lint, and is never committed. Needs Node 24 and Java 21 (for the
 generator); with the service running on port 8080:
@@ -181,9 +186,8 @@ generator); with the service running on port 8080:
 cd frontend && npm ci && npm start
 ```
 
-`ng serve` proxies `/v1` to `localhost:8080`. Open `http://localhost:4200/`, choose or drop a PDF,
-and it opens `/extractions/<extractionId>` when the draft is ready. `npm run lint`, `npm test` and
-`npm run build` are the checks.
+`ng serve` proxies `/v1` to `localhost:8080`. Open `http://localhost:4200/`. `npm run lint`,
+`npm test` and `npm run build` are the checks.
 
 ## Testing
 

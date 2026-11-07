@@ -2,8 +2,7 @@
   @if (submissionId(); as id) {
     <p>
       Confirmed as submission
-      <!-- TODO(next session): link to /submissions/:id once the quote page exists. -->
-      <span class="submission-id" data-testid="submission-id">{{ id }}</span>
+      <a class="submission-id" data-testid="submission-id" [routerLink]="['/submissions', id]">{{ id }}</a>
       @if (canCopy) {
         <button type="button" (click)="copy(id)">Copy ID</button>
       }
@@ -16,6 +15,7 @@
         Copied.
       }
     </p>
+    <p><a [routerLink]="['/submissions', id]">Get a quote for this submission</a></p>
   } @else {
     <p>This extraction is confirmed, but no submission ID was recorded.</p>
   }
@@ -28,13 +28,5 @@
 } @else if (loadError(); as message) {
   <p class="error" role="alert">{{ message }}</p>
 } @else if (current(); as s) {
-  <dl>
-    @for (field of fields; track field.key) {
-      <dt>{{ field.label }}</dt>
-      <dd>
-        <span [id]="'value-' + field.key" [attr.aria-describedby]="describedBy(field)">{{ value(field, s) }}</span>
-        <app-field-notes [id]="'value-' + field.key" [notes]="notes(field)" />
-      </dd>
-    }
-  </dl>
+  <app-submission-summary [submission]="s" [notes]="notes" />
 }

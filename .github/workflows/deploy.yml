@@ -40,6 +40,7 @@ jobs:
   deploy:
     name: Build, push and deploy
     needs: test
+    if: github.repository == 'kowalchukdan-lgtm/quote-service'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

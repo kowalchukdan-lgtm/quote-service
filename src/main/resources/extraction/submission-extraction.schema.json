@@ -1,0 +1,74 @@
+{
+  "$comment": "Model output schema for document extraction, sent in strict structured-output mode. It mirrors SubmissionRequest in openapi/quote-api.yaml, flattened, with every field nullable so the model can say 'not in the document' instead of guessing. Strict mode needs every property listed in required and additionalProperties false; formats are checked by ExtractionResponseParser, not here. ExtractionSchemaContractTest keeps this in step with the API contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["businessName", "address", "naicsCode", "annualRevenue", "perOccurrenceLimit", "aggregateLimit", "effectiveDate", "flags", "evidence"],
+  "properties": {
+    "businessName": {
+      "type": ["string", "null"],
+      "description": "Legal name of the insured (not a DBA or trade name, not the broker)."
+    },
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line1", "line2", "city", "region", "postalCode", "country"],
+      "description": "The insured's risk location, never the broker's address.",
+      "properties": {
+        "line1": { "type": ["string", "null"], "description": "Street address." },
+        "line2": { "type": ["string", "null"], "description": "Suite, unit or floor, if any." },
+        "city": { "type": ["string", "null"] },
+        "region": { "type": ["string", "null"], "description": "Two-letter US state code, e.g. PA." },
+        "postalCode": { "type": ["string", "null"], "description": "US ZIP (12345) or ZIP+4 (12345-6789)." },
+        "country": { "type": ["string", "null"], "description": "ISO 3166-1 alpha-2 code, e.g. US." }
+      }
+    },
+    "naicsCode": {
+      "type": ["string", "null"],
+      "description": "Six-digit 2022 NAICS code."
+    },
+    "annualRevenue": {
+      "type": ["string", "null"],
+      "description": "Annual gross revenue in USD as a plain decimal string with no symbols or commas, e.g. 1850000.00."
+    },
+    "perOccurrenceLimit": {
+      "type": ["string", "null"],
+      "description": "Each-occurrence GL limit in USD as a plain decimal string, e.g. 1000000.00."
+    },
+    "aggregateLimit": {
+      "type": ["string", "null"],
+      "description": "General aggregate GL limit in USD as a plain decimal string, e.g. 2000000.00."
+    },
+    "effectiveDate": {
+      "type": ["string", "null"],
+      "description": "Requested policy effective date as yyyy-MM-dd."
+    },
+    "flags": {
+      "type": "array",
+      "description": "Fields a human reviewer should check.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "reason", "note"],
+        "properties": {
+          "field": { "type": "string", "description": "A field name from this schema (address parts as address.city), or 'document'." },
+          "reason": { "type": "string", "enum": ["MISSING", "APPROXIMATE", "AMBIGUOUS", "SUSPECTED_INSTRUCTION"] },
+          "note": { "type": ["string", "null"], "description": "One short sentence for the reviewer." }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "For each non-null field, the short passage of the document it came from.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "sourceText", "confidence"],
+        "properties": {
+          "field": { "type": "string" },
+          "sourceText": { "type": "string", "description": "Copied from the document, at most about 120 characters." },
+          "confidence": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] }
+        }
+      }
+    }
+  }
+}

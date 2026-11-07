@@ -180,6 +180,8 @@ Surefire runs `*Test` during `test`, and Failsafe runs `*IT` during `integration
   (`OpenApiContract`).
 - `RatingArchitectureTest` (ArchUnit) fails the build if the `rating` package, or its tests,
   depend on Spring, JPA, the database, or the JPA-backed application packages.
+- `ExtractionArchitectureTest` (ArchUnit) keeps the `extraction` core free of Spring and the
+  Azure SDK, and keeps all of extraction away from the submission, quote and rating packages.
 - Integration tests never touch your local database: Testcontainers starts a fresh
   `postgres:17-alpine` container on a random port.
 
@@ -206,12 +208,46 @@ run "Java: Clean Java Language Server Workspace" once.
 
 ## Roadmap
 
-Planned; none of this has started.
-
-- Deployment to Azure Container Apps with GitHub Actions.
+- **Done:** deployment to Azure Container Apps, with GitHub Actions (OIDC, no stored credentials),
+  managed Postgres, Key Vault, health probes and Application Insights.
+- **In progress: AI-assisted extraction of submission data from broker documents** (see below).
 - An Angular front end for brokers.
 - Cosmos DB for raw submissions as received.
-- AI-assisted extraction of submission data from documents.
+
+### AI document extraction (in progress)
+
+A broker PDF goes in; a *draft* submission comes out, with every field allowed to be empty, flags
+for the reviewer (missing, approximate, ambiguous, invalid, suspected instructions in the
+document) and a short source quote per field. The model only drafts: a person confirms the
+draft, and it then goes through the normal submission rules. Built so far (the engine, no
+endpoints yet):
+
+- `extraction` package, plain Java like `rating`: `DocumentTextReader` (PDFBox; digital PDFs, with
+  page and size limits), `ExtractionPrompt` (instructions; the document is wrapped as data),
+  `ExtractionResponseParser` (never trusts the model: re-checks every value against the contract's
+  formats and flags anything empty), `DocumentExtractor` (the pipeline, with token and latency
+  figures).
+- `extraction.azure`: the only provider-specific code. Azure OpenAI (gpt-5-mini) with strict
+  structured outputs, signed in with Entra ID (managed identity in Azure, `az login` locally).
+  There is no API key; key access is disabled on the AI resource.
+- The model's output schema (`src/main/resources/extraction/submission-extraction.schema.json`)
+  mirrors `SubmissionRequest`; `ExtractionSchemaContractTest` fails if they drift apart.
+- A golden set of five fictional documents with expected answers
+  (`src/test/resources/extraction/golden/`). `DocumentExtractorTest` runs it with a fake model;
+  `GoldenSetLiveEvalTest` scores the real model, field by field, against a 90% pass mark plus two
+  rules that must always hold: a missing value is never guessed, and text in a document never
+  changes what is extracted.
+
+Extraction is switched on only when `QUOTE_EXTRACTION_ENDPOINT` is set, so local runs and the
+normal test suite need no Azure resources. To score the model (calls Azure; a few cents):
+
+```bash
+az login
+EXTRACTION_LIVE_EVAL=true ./mvnw test -Dtest=GoldenSetLiveEvalTest
+```
+
+Next: the API (`POST /v1/extractions`, review, confirm), the golden-set evaluation in CI, and
+token and latency metrics in Application Insights.
 
 ## Deferred
 

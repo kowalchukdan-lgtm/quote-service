@@ -9,6 +9,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import com.kowalchuk.quoteservice.api.SubmissionsApi;
 import com.kowalchuk.quoteservice.api.model.SubmissionDto;
 import com.kowalchuk.quoteservice.api.model.SubmissionRequestDto;
+import com.kowalchuk.quoteservice.web.RawRequestBody;
 
 /**
  * Implements the generated contract interface. Routes, media types, and validation come from
@@ -31,7 +32,9 @@ public class SubmissionController implements SubmissionsApi {
 			String idempotencyKey) {
 		// TODO: Idempotency-Key is validated but not yet honoured; retries create duplicates.
 		// Dedupe (key table, request hash, 409/422 semantics, 24h TTL) needs its own design.
-		Submission submission = service.create(mapper.toNewSubmission(submissionRequestDto));
+		String received = RawRequestBody.current();
+		Submission submission = service.create(mapper.toNewSubmission(submissionRequestDto),
+				received == null ? null : new ReceivedRequest(received, null));
 		// Relative Location (uri-reference): an absolute URL would expose internal hosts
 		// behind the gateway.
 		URI location = UriComponentsBuilder.fromPath(PATH_GET_SUBMISSION).buildAndExpand(submission.getId()).toUri();

@@ -35,6 +35,7 @@
 		<archunit.version>1.4.1</archunit.version>
 		<pdfbox.version>3.0.8</pdfbox.version>
 		<azure-identity.version>1.19.0</azure-identity.version>
+		<azure-cosmos.version>4.83.0</azure-cosmos.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -73,6 +74,12 @@
 			<groupId>com.azure</groupId>
 			<artifactId>azure-identity</artifactId>
 			<version>${azure-identity.version}</version>
+		</dependency>
+		<dependency>
+			<!-- The intake archive in Cosmos DB (NoSQL API); the plain SDK, signed in with Entra ID. -->
+			<groupId>com.azure</groupId>
+			<artifactId>azure-cosmos</artifactId>
+			<version>${azure-cosmos.version}</version>
 		</dependency>
 
 		<dependency>

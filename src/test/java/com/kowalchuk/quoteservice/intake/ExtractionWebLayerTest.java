@@ -169,7 +169,7 @@ class ExtractionWebLayerTest {
 
 	@Test
 	void confirmingCreatesTheSubmissionWithItsLocation() throws Exception {
-		when(service.confirm(eq("ext_TEST"), any())).thenReturn(ExtractionFixtures.submission("sub_TEST"));
+		when(service.confirm(eq("ext_TEST"), any(), any())).thenReturn(ExtractionFixtures.submission("sub_TEST"));
 
 		MvcResult result = confirm("ext_TEST", reviewedRequest());
 
@@ -180,7 +180,7 @@ class ExtractionWebLayerTest {
 
 	@Test
 	void confirmingTwiceIs409() throws Exception {
-		when(service.confirm(eq("ext_TEST"), any()))
+		when(service.confirm(eq("ext_TEST"), any(), any()))
 			.thenThrow(new ExtractionAlreadyConfirmedException("ext_TEST", "sub_TEST"));
 
 		MvcResult result = confirm("ext_TEST", reviewedRequest());

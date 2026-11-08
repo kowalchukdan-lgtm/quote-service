@@ -16,6 +16,7 @@ import com.kowalchuk.quoteservice.api.model.SubmissionDto;
 import com.kowalchuk.quoteservice.api.model.SubmissionRequestDto;
 import com.kowalchuk.quoteservice.submission.Submission;
 import com.kowalchuk.quoteservice.submission.SubmissionMapper;
+import com.kowalchuk.quoteservice.web.RawRequestBody;
 
 /**
  * Implements the generated {@link ExtractionsApi}. Confirmation takes a full
@@ -53,7 +54,8 @@ public class ExtractionController implements ExtractionsApi {
 	@Override
 	public ResponseEntity<SubmissionDto> confirmExtraction(String extractionId,
 			SubmissionRequestDto submissionRequestDto) {
-		Submission submission = service.confirm(extractionId, submissionMapper.toNewSubmission(submissionRequestDto));
+		Submission submission = service.confirm(extractionId, submissionMapper.toNewSubmission(submissionRequestDto),
+				RawRequestBody.current());
 		URI location = UriComponentsBuilder.fromPath(SubmissionsApi.PATH_GET_SUBMISSION)
 			.buildAndExpand(submission.getId())
 			.toUri();

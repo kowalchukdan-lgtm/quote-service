@@ -4,6 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 /**
  * The instructions and schema for extraction. Kept in one place, versioned with the code and
@@ -54,6 +57,12 @@ public final class ExtractionPrompt {
 			- Never output a decision, approval, premium or status. You only draft fields.
 			""";
 
+	/**
+	 * Identifies the prompt an answer came from: a hash of the instructions, the document wrapper
+	 * and the schema. It is derived from the text, so a prompt change always changes it.
+	 */
+	public static final String VERSION = versionOf(SYSTEM_PROMPT + userContent(""), loadSchema());
+
 	private final String jsonSchema;
 
 	public ExtractionPrompt() {
@@ -73,6 +82,19 @@ public final class ExtractionPrompt {
 		String safe = documentText.replace(DOCUMENT_END, "</ document>");
 		return "Extract the submission from this broker document.\n\n" + DOCUMENT_START + "\n" + safe + "\n"
 				+ DOCUMENT_END;
+	}
+
+	static String versionOf(String instructions, String schema) {
+		try {
+			MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+			sha256.update(instructions.getBytes(StandardCharsets.UTF_8));
+			sha256.update((byte) 0);
+			sha256.update(schema.getBytes(StandardCharsets.UTF_8));
+			return "sha256:" + HexFormat.of().formatHex(sha256.digest()).substring(0, 12);
+		}
+		catch (NoSuchAlgorithmException ex) {
+			throw new IllegalStateException("SHA-256 is always available in the JDK", ex);
+		}
 	}
 
 	private static String loadSchema() {

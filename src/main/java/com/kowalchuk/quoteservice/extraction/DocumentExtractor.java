@@ -42,7 +42,7 @@ public class DocumentExtractor {
 		ModelResponse response = model.complete(prompt.requestFor(text));
 		ExtractedSubmission draft = parser.parse(response.content());
 		return new ExtractionResult(draft, response.model(), response.inputTokens(), response.outputTokens(),
-				Duration.between(start, clock.instant()));
+				Duration.between(start, clock.instant()), response.content(), ExtractionPrompt.VERSION);
 	}
 
 }

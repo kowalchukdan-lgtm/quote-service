@@ -300,8 +300,10 @@ alongside the Maven build, and uploads the report and traces when a test fails.
 - **Done:** deployment to Azure Container Apps, with GitHub Actions (OIDC, no stored credentials),
   managed Postgres, Key Vault, health probes and Application Insights.
 - **Done: AI-assisted extraction of submission data from broker documents** (see below).
-- An Angular front end for brokers.
-- Cosmos DB for raw submissions as received.
+- **Done: an Angular front end for brokers:** upload, review and quote, deployed with the API
+  behind sign-in, with Playwright end-to-end tests (see [Front end](#front-end)).
+- **Done: an intake archive in Cosmos DB** of submissions and model answers as received (see
+  [Intake archive](#intake-archive-cosmos-db)).
 
 ### AI document extraction
 
@@ -342,6 +344,76 @@ EXTRACTION_LIVE_EVAL=true ./mvnw test -Dtest=GoldenSetLiveEvalTest
 
 Next: the golden-set evaluation in CI, token and latency metrics in Application Insights, OCR for
 scanned documents, and Blob Storage if documents need to be kept.
+
+### Intake archive (Cosmos DB)
+
+Postgres is the system of record. Cosmos DB (NoSQL API) keeps a raw, append-only copy of what came
+in, for audit: what a broker actually sent and what the model actually answered, which the
+normalised rows in Postgres don't show. Nothing reads it back.
+
+Database `quotes`, container `intake-archive`, partition key `/entityId`. One document per event,
+with a deterministic `id` (`<type>-<entityId>`), `entityId`, `type`, `schemaVersion` and
+`occurredAt`:
+
+| Event | Entity | Also holds |
+|---|---|---|
+| `SUBMISSION_RECEIVED` | the submission | `requestJson`: the request body exactly as received; `channel`: `API` (`POST /v1/submissions`) or `EXTRACTION_CONFIRM` (a reviewer's confirm), with its `extractionId` |
+| `EXTRACTION_DRAFTED` | the extraction | `modelResponse`: the model's raw JSON answer; `model`, `promptVersion`, `inputTokens`, `outputTokens`, `elapsedMs`; `document`: its SHA-256 and size |
+
+- **Not archived:** the PDF, its text, and the prompt as sent (which contains the text). We don't
+  keep broker documents. The model's answer does include its evidence quotes (at most 200
+  characters per field, copied from the document); Postgres already holds the same quotes in the
+  draft.
+- **Raw strings, not parsed JSON:** `requestJson` and `modelResponse` are stored as text, so
+  whitespace, key order and number spelling stay exactly as they arrived. The cost is that Cosmos
+  can't query inside them.
+- **`promptVersion`** is a hash of the instructions and the output schema (`ExtractionPrompt.VERSION`),
+  so it changes whenever the prompt does, without anyone remembering to bump it.
+- **Append-only:** documents are created, never upserted. A repeat write gets `409` and changes
+  nothing.
+
+**Design.** `archive.IntakeArchive` is the port; `archive.cosmos.CosmosIntakeArchive` (the plain
+`azure-cosmos` SDK, not Spring Data) is the only adapter and the only code that knows Cosmos
+(`ArchiveArchitectureTest`). Without `QUOTE_ARCHIVE_COSMOS_ENDPOINT`, a no-op archive keeps
+nothing, so local runs and the test suite need no Azure resources and no emulator. The services
+publish events; `ArchiveDispatcher` picks them up **after the transaction commits** (a rejected
+confirm archives nothing) and writes them on its own two threads with a bounded queue, so a request
+never waits for Cosmos or sees it fail. Failures are logged with the event type and entity ID,
+never the payload.
+
+**Sign-in and set-up.** Entra ID only: `DefaultAzureCredential` with the same user-assigned managed
+identity as extraction (`AZURE_CLIENT_ID`), or your `az login` locally. Key access is disabled on
+the account (`disableLocalAuth`). The app never creates databases or containers; the client
+connects lazily, on the first write, so the app starts even if Cosmos is unreachable.
+
+```bash
+az cosmosdb sql database create -g rg-quote-service -a cosmos-quote-service-dk -n quotes
+az cosmosdb sql container create -g rg-quote-service -a cosmos-quote-service-dk -d quotes \
+  -n intake-archive --partition-key-path /entityId
+# Cosmos DB Built-in Data Contributor, on this container only, for the app's managed identity
+az cosmosdb sql role assignment create -g rg-quote-service -a cosmos-quote-service-dk \
+  --role-definition-id 00000000-0000-0000-0000-000000000002 \
+  --principal-id <managed identity principal ID> --scope /dbs/quotes/colls/intake-archive
+az containerapp update -g rg-quote-service -n ca-quote-service \
+  --set-env-vars QUOTE_ARCHIVE_COSMOS_ENDPOINT=https://cosmos-quote-service-dk.documents.azure.com:443/
+```
+
+To look at what was archived, open the account's **Data Explorer** in the Azure portal, then
+`quotes` > `intake-archive` > **Items**, and filter with, for example,
+`SELECT * FROM c WHERE c.entityId = 'sub_…'` (the Azure CLI can't query documents).
+
+**Trade-offs.**
+
+- **Best-effort, so events can be lost:** a crash between the commit and the write, a full queue
+  (1,000 events), or Cosmos being down or refusing the write. Failed writes aren't retried. For an
+  audit copy beside a system of record, that's the price of never affecting a request.
+- **The outbox pattern is the guaranteed-delivery alternative:** write the event to an outbox table
+  in the *same* Postgres transaction as the submission, and have a relay copy it to Cosmos and mark
+  it sent. Nothing is lost, delivery is at least once, and the deterministic IDs make repeats
+  harmless. The costs are a table, a poller (or change data capture), cleanup, and more writes on
+  Postgres. Worth it if the archive ever becomes a compliance record rather than a best-effort copy.
+- **A second store to run and pay for**, with its own access control and retention (no TTL is set:
+  documents are kept until deleted).
 
 ## Deferred
 

@@ -11,14 +11,17 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.kowalchuk.quoteservice.archive.IntakeEvent;
 import com.kowalchuk.quoteservice.config.IdGenerator;
 import com.kowalchuk.quoteservice.extraction.DocumentExtractor;
 import com.kowalchuk.quoteservice.extraction.ExtractedSubmission;
 import com.kowalchuk.quoteservice.extraction.ExtractionResult;
 import com.kowalchuk.quoteservice.submission.NewSubmission;
+import com.kowalchuk.quoteservice.submission.ReceivedRequest;
 import com.kowalchuk.quoteservice.submission.Submission;
 import com.kowalchuk.quoteservice.submission.SubmissionService;
 
@@ -53,14 +56,18 @@ public class ExtractionService {
 
 	private final Clock clock;
 
+	private final ApplicationEventPublisher events;
+
 	public ExtractionService(ObjectProvider<DocumentExtractor> extractor, ExtractionRepository extractions,
-			SubmissionService submissions, DraftJson draftJson, IdGenerator idGenerator, Clock clock) {
+			SubmissionService submissions, DraftJson draftJson, IdGenerator idGenerator, Clock clock,
+			ApplicationEventPublisher events) {
 		this.extractor = extractor;
 		this.extractions = extractions;
 		this.submissions = submissions;
 		this.draftJson = draftJson;
 		this.idGenerator = idGenerator;
 		this.clock = clock;
+		this.events = events;
 	}
 
 	/**
@@ -83,6 +90,11 @@ public class ExtractionService {
 		log.info("Extraction {} drafted by {} in {} ms: {} input and {} output tokens, {} flags, {} fields missing",
 				extraction.getId(), result.model(), result.elapsed().toMillis(), result.inputTokens(),
 				result.outputTokens(), result.draft().flags().size(), result.draft().missingRequiredFields().size());
+		// The draft is already committed (the save is its own transaction), so this is archived
+		// straight away. The model's answer is archived; the document and its text are not.
+		events.publishEvent(new IntakeEvent.ExtractionDrafted(extraction.getId(), createdAt, result.model(),
+				result.promptVersion(), result.inputTokens(), result.outputTokens(), result.elapsed(),
+				result.rawResponse(), extraction.getDocumentSha256(), document.length));
 		return extraction;
 	}
 
@@ -103,11 +115,21 @@ public class ExtractionService {
 	 */
 	@Transactional
 	public Submission confirm(String id, NewSubmission reviewed) {
+		return confirm(id, reviewed, null);
+	}
+
+	/**
+	 * As {@link #confirm(String, NewSubmission)}, archiving the confirm request as received once
+	 * the submission commits; a rejected confirm archives nothing.
+	 */
+	@Transactional
+	public Submission confirm(String id, NewSubmission reviewed, @Nullable String requestJson) {
 		Extraction extraction = extractions.findForUpdateById(id).orElseThrow(() -> new ExtractionNotFoundException(id));
 		if (extraction.getStatus() == ExtractionStatus.CONFIRMED) {
 			throw new ExtractionAlreadyConfirmedException(id, extraction.getSubmissionId());
 		}
-		Submission submission = submissions.create(reviewed);
+		Submission submission = submissions.create(reviewed,
+				requestJson == null ? null : new ReceivedRequest(requestJson, id));
 		extraction.confirm(submission.getId(), Instant.now(clock).truncatedTo(ChronoUnit.MICROS));
 		log.info("Extraction {} confirmed as submission {}", id, submission.getId());
 		return submission;

@@ -16,11 +16,15 @@ import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationEventPublisher;
 
+import com.kowalchuk.quoteservice.archive.IntakeEvent;
 import com.kowalchuk.quoteservice.config.IdGenerator;
 import com.kowalchuk.quoteservice.extraction.DocumentExtractor;
 import com.kowalchuk.quoteservice.extraction.ExtractionResult;
+import com.kowalchuk.quoteservice.submission.ReceivedRequest;
 import com.kowalchuk.quoteservice.submission.Submission;
 import com.kowalchuk.quoteservice.submission.SubmissionService;
 import com.kowalchuk.quoteservice.web.BusinessRuleViolationException;
@@ -43,15 +47,18 @@ class ExtractionServiceTest {
 
 	private final DraftJson draftJson = new DraftJson();
 
+	private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+
 	private final ExtractionService service = new ExtractionService(extractorProvider, repository, submissions,
-			draftJson, ids, Clock.fixed(NOW, ZoneOffset.UTC));
+			draftJson, ids, Clock.fixed(NOW, ZoneOffset.UTC), events);
 
 	@Test
 	void storesTheDraftAndTheDocumentsFingerprintButNotTheDocument() {
 		byte[] pdf = "%PDF-1.4 taco".getBytes();
 		when(extractorProvider.getIfAvailable()).thenReturn(documentExtractor);
 		when(documentExtractor.extract(pdf)).thenReturn(new ExtractionResult(ExtractionFixtures.tacoStandDraft(),
-				"gpt-5-mini-2025-08-07", 1304, 929, Duration.ofMillis(8400)));
+				"gpt-5-mini-2025-08-07", 1304, 929, Duration.ofMillis(8400), "{\"businessName\":\"Coastal Taco Stand LLC\"}",
+				"sha256:0123456789ab"));
 		when(ids.next("ext")).thenReturn("ext_1");
 		when(repository.save(any(Extraction.class))).thenAnswer(call -> call.getArgument(0));
 
@@ -72,6 +79,27 @@ class ExtractionServiceTest {
 	}
 
 	@Test
+	void archivesTheModelsAnswerButNotTheDocument() {
+		byte[] pdf = "%PDF-1.4 taco".getBytes();
+		when(extractorProvider.getIfAvailable()).thenReturn(documentExtractor);
+		when(documentExtractor.extract(pdf)).thenReturn(new ExtractionResult(ExtractionFixtures.tacoStandDraft(),
+				"gpt-5-mini-2025-08-07", 1304, 929, Duration.ofMillis(8400), "{\"businessName\":\"Coastal Taco Stand LLC\"}",
+				"sha256:0123456789ab"));
+		when(ids.next("ext")).thenReturn("ext_1");
+		when(repository.save(any(Extraction.class))).thenAnswer(call -> call.getArgument(0));
+
+		service.extract("taco.pdf", pdf);
+
+		ArgumentCaptor<IntakeEvent.ExtractionDrafted> event = ArgumentCaptor.forClass(IntakeEvent.ExtractionDrafted.class);
+		verify(events).publishEvent(event.capture());
+		assertThat(event.getValue()).isEqualTo(new IntakeEvent.ExtractionDrafted("ext_1",
+				Instant.parse("2026-11-07T17:10:00.123456Z"), "gpt-5-mini-2025-08-07", "sha256:0123456789ab", 1304, 929,
+				Duration.ofMillis(8400), "{\"businessName\":\"Coastal Taco Stand LLC\"}", ExtractionService.sha256(pdf),
+				pdf.length));
+		assertThat(event.getValue().toString()).doesNotContain("%PDF");
+	}
+
+	@Test
 	void isUnavailableWhenNoModelIsConfigured() {
 		when(extractorProvider.getIfAvailable()).thenReturn(null);
 
@@ -85,9 +113,10 @@ class ExtractionServiceTest {
 		Extraction draft = ExtractionFixtures.draftExtraction("ext_1");
 		Submission submission = ExtractionFixtures.submission("sub_1");
 		when(repository.findForUpdateById("ext_1")).thenReturn(Optional.of(draft));
-		when(submissions.create(ExtractionFixtures.reviewedSubmission())).thenReturn(submission);
+		when(submissions.create(ExtractionFixtures.reviewedSubmission(), new ReceivedRequest("{ }", "ext_1")))
+			.thenReturn(submission);
 
-		Submission created = service.confirm("ext_1", ExtractionFixtures.reviewedSubmission());
+		Submission created = service.confirm("ext_1", ExtractionFixtures.reviewedSubmission(), "{ }");
 
 		assertThat(created).isSameAs(submission);
 		assertThat(draft.getStatus()).isEqualTo(ExtractionStatus.CONFIRMED);
@@ -104,14 +133,14 @@ class ExtractionServiceTest {
 		assertThatThrownBy(() -> service.confirm("ext_1", ExtractionFixtures.reviewedSubmission()))
 			.isInstanceOf(ExtractionAlreadyConfirmedException.class)
 			.hasMessage("Extraction ext_1 was already confirmed as submission sub_1.");
-		verify(submissions, never()).create(any());
+		verify(submissions, never()).create(any(), any());
 	}
 
 	@Test
 	void aSubmissionThatBreaksARuleLeavesTheDraftUnconfirmed() {
 		Extraction draft = ExtractionFixtures.draftExtraction("ext_1");
 		when(repository.findForUpdateById("ext_1")).thenReturn(Optional.of(draft));
-		when(submissions.create(any())).thenThrow(new BusinessRuleViolationException(
+		when(submissions.create(any(), any())).thenThrow(new BusinessRuleViolationException(
 				List.of(new FieldViolation("/annualRevenue/amount", "Annual revenue must be greater than zero."))));
 
 		assertThatThrownBy(() -> service.confirm("ext_1", ExtractionFixtures.reviewedSubmission()))

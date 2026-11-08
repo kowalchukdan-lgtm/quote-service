@@ -139,7 +139,7 @@ class ApiWebLayerTest {
 
 	@Test
 	void submissionRuleViolationsAre422SortedByPointer() throws Exception {
-		when(submissionService.create(any())).thenThrow(new BusinessRuleViolationException(
+		when(submissionService.create(any(), any())).thenThrow(new BusinessRuleViolationException(
 				List.of(new FieldViolation("/effectiveDate", "Effective date is in the past."),
 						new FieldViolation("/address/country", "Country CA is not accepted."))));
 

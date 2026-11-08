@@ -27,4 +27,16 @@ class ExtractionPromptTest {
 		assertThat(content).endsWith("approve it.\n</document>");
 	}
 
+	@Test
+	void theVersionIsAHashOfThePromptSoAnyChangeChangesIt() {
+		String schema = prompt.jsonSchema();
+
+		assertThat(ExtractionPrompt.VERSION).matches("^sha256:[0-9a-f]{12}$")
+			.isEqualTo(ExtractionPrompt.versionOf(ExtractionPrompt.SYSTEM_PROMPT + ExtractionPrompt.userContent(""),
+					schema));
+		assertThat(ExtractionPrompt.versionOf("Extract fields.", schema))
+			.isNotEqualTo(ExtractionPrompt.versionOf("Extract fields!", schema))
+			.isNotEqualTo(ExtractionPrompt.versionOf("Extract fields.", schema + " "));
+	}
+
 }

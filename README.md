@@ -312,6 +312,11 @@ for the reviewer (missing, approximate, ambiguous, invalid, suspected instructio
 document) and a short source quote per field. The model only drafts: a person confirms the
 draft, and it then goes through the normal submission rules.
 
+Limits: a digital PDF (no scans) of at most 10 MB, 20 pages and 60,000 characters of text. A
+larger upload gets `413`; a document that breaks the other limits gets `422`, before the model
+is called. The 10 MB limit is set in `application.properties` and checked again by the upload
+screen.
+
 - `extraction` package, plain Java like `rating`: `DocumentTextReader` (PDFBox; digital PDFs, with
   page and size limits), `ExtractionPrompt` (instructions; the document is wrapped as data),
   `ExtractionResponseParser` (never trusts the model: re-checks every value against the contract's

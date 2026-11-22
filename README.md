@@ -317,6 +317,9 @@ larger upload gets `413`; a document that breaks the other limits gets `422`, be
 is called. The 10 MB limit is set in `application.properties` and checked again by the upload
 screen.
 
+A failed model call returns a `502` with a generic message and isn't retried automatically: each
+attempt is a paid call. The upload screen offers **Try again**, which resends the same document.
+
 - `extraction` package, plain Java like `rating`: `DocumentTextReader` (PDFBox; digital PDFs, with
   page and size limits), `ExtractionPrompt` (instructions; the document is wrapped as data),
   `ExtractionResponseParser` (never trusts the model: re-checks every value against the contract's
@@ -431,6 +434,7 @@ Known gaps and decisions left open, recorded rather than hidden:
   [Authentication](#authentication)), but the contract's bearer tokens aren't checked by the API,
   and a broker getting `404` for another broker's resources isn't implemented.
 - **Rate limiting (`429`) and overload `503`s**, declared in the contract.
+- **Retrying temporary model errors** (a `429` or a timeout) once, with back-off.
 - **Tracing.** `TraceIdFilter` is a stand-in until Micrometer Tracing.
 - **Blank business names.** A name made only of non-breaking spaces is accepted (Java's `\s` is
   ASCII-only, unlike the contract's ECMAScript regex); a test records this gap.

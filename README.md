@@ -340,7 +340,8 @@ screen.
   rule failure creates nothing and leaves the draft to be corrected.
 
 Extraction is switched on only when `QUOTE_EXTRACTION_ENDPOINT` is set, so local runs and the
-normal test suite need no Azure resources. To score the model (calls Azure; a few cents):
+normal test suite need no Azure resources. Without it, uploads get a `503`, and submissions,
+quotes and confirming existing drafts keep working. To score the model (calls Azure; a few cents):
 
 ```bash
 az login
@@ -429,7 +430,7 @@ Known gaps and decisions left open, recorded rather than hidden:
 - **Authentication and broker scoping.** Sign-in now gates the deployed app (see
   [Authentication](#authentication)), but the contract's bearer tokens aren't checked by the API,
   and a broker getting `404` for another broker's resources isn't implemented.
-- **Rate limiting (`429`) and `503` handling**, declared in the contract.
+- **Rate limiting (`429`) and overload `503`s**, declared in the contract.
 - **Tracing.** `TraceIdFilter` is a stand-in until Micrometer Tracing.
 - **Blank business names.** A name made only of non-breaking spaces is accepted (Java's `\s` is
   ASCII-only, unlike the contract's ECMAScript regex); a test records this gap.
